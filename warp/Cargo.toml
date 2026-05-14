@@ -1,0 +1,58 @@
+[package]
+name = "p3-warp"
+description = "WARP accumulation scheme for Reed-Solomon codes (eprint 2025/753)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+itertools.workspace = true
+p3-challenger.workspace = true
+p3-commit.workspace = true
+p3-dft.workspace = true
+p3-field.workspace = true
+p3-matrix.workspace = true
+p3-maybe-rayon.workspace = true
+p3-merkle-tree.workspace = true
+p3-multilinear-util.workspace = true
+p3-symmetric.workspace = true
+p3-util.workspace = true
+p3-whir.workspace = true
+serde = { workspace = true, features = ["derive", "alloc"] }
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+p3-batch-stark.workspace = true
+p3-baby-bear = { path = "../baby-bear" }
+p3-circuit.workspace = true
+p3-circuit-prover = { workspace = true, features = ["std"] }
+p3-fri.workspace = true
+p3-poseidon2-circuit-air.workspace = true
+p3-recursion.workspace = true
+p3-uni-stark.workspace = true
+postcard = { workspace = true, features = ["use-std"] }
+proptest.workspace = true
+rand.workspace = true
+
+[features]
+parallel = ["p3-maybe-rayon/parallel"]
+recursive-parallel = [
+    "parallel",
+    "p3-whir/parallel",
+    "p3-circuit-prover/parallel",
+    "p3-circuit-prover/std",
+    "p3-poseidon2-circuit-air/parallel",
+]
+
+[[bench]]
+name = "sumcheck"
+harness = false
+
+[lints]
+workspace = true

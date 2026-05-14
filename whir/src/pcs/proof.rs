@@ -22,6 +22,11 @@ pub struct WhirProof<F: Send + Sync + Clone, EF, MT: Mmcs<F>> {
     pub initial_sumcheck: SumcheckData<F, EF>,
     /// Per-round proofs.
     pub rounds: Vec<WhirRoundProof<F, EF, MT>>,
+    /// Fiat-Shamir-derived final query indices after native WHIR sorting and
+    /// deduplication. These are recomputable by the verifier, so they are kept
+    /// only as in-memory metadata for recursive verifier circuits.
+    #[serde(skip)]
+    pub final_query_indices: Vec<usize>,
     /// Final polynomial coefficients (sent in the clear).
     pub final_poly: Option<Poly<EF>>,
     /// Final round PoW witness.
@@ -39,6 +44,7 @@ impl<F: Default + Send + Sync + Clone, EF: Default, MT: Mmcs<F>> Default for Whi
             initial_ood_answers: Vec::new(),
             initial_sumcheck: SumcheckData::default(),
             rounds: Vec::new(),
+            final_query_indices: Vec::new(),
             final_poly: None,
             final_pow_witness: F::default(),
             final_queries: Vec::new(),
@@ -62,6 +68,11 @@ pub struct WhirRoundProof<F: Send + Sync + Clone, EF, MT: Mmcs<F>> {
     pub pow_witness: F,
     /// STIR query openings.
     pub queries: Vec<QueryOpening<F, EF, MT::Proof>>,
+    /// Fiat-Shamir-derived query indices after native WHIR sorting and
+    /// deduplication. These are verifier-recomputable metadata and are not
+    /// serialized.
+    #[serde(skip)]
+    pub query_indices: Vec<usize>,
     /// Sumcheck data for this round.
     pub sumcheck: SumcheckData<F, EF>,
 }
@@ -75,6 +86,7 @@ impl<F: Default + Send + Sync + Clone, EF: Default, MT: Mmcs<F>> Default
             ood_answers: Vec::new(),
             pow_witness: F::default(),
             queries: Vec::new(),
+            query_indices: Vec::new(),
             sumcheck: SumcheckData::default(),
         }
     }
@@ -96,6 +108,20 @@ pub enum QueryOpening<F, EF, Proof> {
     /// Extension field opening (subsequent rounds).
     #[serde(rename = "extension")]
     Extension { values: Vec<EF>, proof: Proof },
+    /// Opening of one shared base-field root that commits several initial
+    /// polynomials as an MMCS matrix batch.
+    #[serde(rename = "shared_base")]
+    SharedBase { values: Vec<Vec<F>>, proof: Proof },
+    /// Opening of one shared extension-field root that commits several initial
+    /// polynomials as an MMCS matrix batch.
+    #[serde(rename = "shared_extension")]
+    SharedExtension { values: Vec<Vec<EF>>, proof: Proof },
+    /// Batched initial opening against multiple independently committed
+    /// oracles.
+    #[serde(rename = "batched")]
+    Batched {
+        openings: Vec<QueryOpening<F, EF, Proof>>,
+    },
 }
 
 impl<F: Default + Send + Sync + Clone, EF: Default, MT: Mmcs<F>> WhirProof<F, EF, MT> {
@@ -116,6 +142,7 @@ impl<F: Default + Send + Sync + Clone, EF: Default, MT: Mmcs<F>> WhirProof<F, EF
             initial_ood_answers: Vec::new(),
             initial_sumcheck: SumcheckData::default(),
             rounds: (0..num_rounds).map(|_| WhirRoundProof::default()).collect(),
+            final_query_indices: Vec::with_capacity(num_queries),
             final_poly: None,
             final_pow_witness: F::default(),
             final_queries: Vec::with_capacity(num_queries),
