@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use p3_challenger::{CanObserve, FieldChallenger, GrindingChallenger};
+use p3_challenger::{CanObserve, CanSampleUniformBits, FieldChallenger, GrindingChallenger};
 use p3_commit::{ExtensionMmcs, Mmcs, MultilinearOpenedValues, MultilinearPcs};
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, Field, TwoAdicField};
@@ -1490,8 +1490,11 @@ where
     EF: ExtensionField<F> + TwoAdicField,
     MT: Mmcs<F>,
     MT::Commitment: PartialEq,
-    Challenger:
-        FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment> + Clone,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanObserve<MT::Commitment>
+        + CanSampleUniformBits<F>
+        + Clone,
     Dft: TwoAdicSubgroupDft<F>,
 {
     type Val = F;

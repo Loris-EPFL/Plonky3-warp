@@ -78,7 +78,8 @@ use std::vec::Vec;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use p3_baby_bear::{BabyBear, Poseidon2BabyBear, default_babybear_poseidon2_16};
 use p3_challenger::{
-    CanObserve, CanSample, CanSampleBits, DuplexChallenger, FieldChallenger, GrindingChallenger,
+    CanObserve, CanSample, CanSampleBits, CanSampleUniformBits, DuplexChallenger, FieldChallenger,
+    GrindingChallenger, ResamplingError,
 };
 use p3_circuit::CircuitBuilder;
 use p3_circuit::ops::{Poseidon2Config, generate_poseidon2_trace, generate_recompose_trace};
@@ -231,6 +232,15 @@ impl CanSample<F> for BenchChallenger {
 impl CanSampleBits<usize> for BenchChallenger {
     fn sample_bits(&mut self, bits: usize) -> usize {
         self.0.sample_bits(bits)
+    }
+}
+
+impl CanSampleUniformBits<F> for BenchChallenger {
+    fn sample_uniform_bits<const RESAMPLE: bool>(
+        &mut self,
+        bits: usize,
+    ) -> Result<usize, ResamplingError> {
+        self.0.sample_uniform_bits::<RESAMPLE>(bits)
     }
 }
 
