@@ -27,6 +27,11 @@ pub struct WhirProof<F: Send + Sync + Clone, EF, MT: Mmcs<F>> {
     /// only as in-memory metadata for recursive verifier circuits.
     #[serde(skip)]
     pub final_query_indices: Vec<usize>,
+    /// Raw Fiat-Shamir final query draws before native WHIR sorting and
+    /// deduplication. Kept only as in-memory metadata so recursive verifier
+    /// circuits can replay the native transcript exactly.
+    #[serde(skip)]
+    pub final_query_sample_indices: Vec<usize>,
     /// Final polynomial coefficients (sent in the clear).
     pub final_poly: Option<Poly<EF>>,
     /// Final round PoW witness.
@@ -45,6 +50,7 @@ impl<F: Default + Send + Sync + Clone, EF: Default, MT: Mmcs<F>> Default for Whi
             initial_sumcheck: SumcheckData::default(),
             rounds: Vec::new(),
             final_query_indices: Vec::new(),
+            final_query_sample_indices: Vec::new(),
             final_poly: None,
             final_pow_witness: F::default(),
             final_queries: Vec::new(),
@@ -73,6 +79,10 @@ pub struct WhirRoundProof<F: Send + Sync + Clone, EF, MT: Mmcs<F>> {
     /// serialized.
     #[serde(skip)]
     pub query_indices: Vec<usize>,
+    /// Raw Fiat-Shamir query draws before native WHIR sorting and deduplication.
+    /// These are verifier-recomputable metadata and are not serialized.
+    #[serde(skip)]
+    pub query_sample_indices: Vec<usize>,
     /// Sumcheck data for this round.
     pub sumcheck: SumcheckData<F, EF>,
 }
@@ -87,6 +97,7 @@ impl<F: Default + Send + Sync + Clone, EF: Default, MT: Mmcs<F>> Default
             pow_witness: F::default(),
             queries: Vec::new(),
             query_indices: Vec::new(),
+            query_sample_indices: Vec::new(),
             sumcheck: SumcheckData::default(),
         }
     }
@@ -143,6 +154,7 @@ impl<F: Default + Send + Sync + Clone, EF: Default, MT: Mmcs<F>> WhirProof<F, EF
             initial_sumcheck: SumcheckData::default(),
             rounds: (0..num_rounds).map(|_| WhirRoundProof::default()).collect(),
             final_query_indices: Vec::with_capacity(num_queries),
+            final_query_sample_indices: Vec::with_capacity(num_queries),
             final_poly: None,
             final_pow_witness: F::default(),
             final_queries: Vec::with_capacity(num_queries),

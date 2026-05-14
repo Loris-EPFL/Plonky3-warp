@@ -29,12 +29,6 @@ use crate::pcs::{verify_batch_circuit, verify_batch_circuit_from_extension_opene
 use crate::traits::{RecursiveChallenger, RecursiveMmcs};
 use crate::verifier::{ObservableCommitment, VerificationError};
 
-/// Native WHIR caps each transcript bit squeeze at this many bits.
-///
-/// Keep this equal to `p3_whir::pcs::utils::MAX_SAMPLE_BITS`; that constant is
-/// private in the native crate, so the recursive verifier mirrors it here.
-const WHIR_MAX_SAMPLE_BITS: usize = 20;
-
 /// Commitment data parsed from a WHIR proof inside the circuit.
 ///
 /// Native WHIR parses a commitment by observing the MMCS root, sampling OOD
@@ -832,6 +826,36 @@ where
     eq
 }
 
+fn constrain_sampled_query_indices<EF>(
+    circuit: &mut CircuitBuilder<EF>,
+    sampled_bits: &[Vec<Target>],
+    expected_sample_bits: &[Vec<Target>],
+) -> Result<(), VerificationError>
+where
+    EF: Field,
+{
+    if sampled_bits.len() != expected_sample_bits.len() {
+        return Err(VerificationError::InvalidProofShape(format!(
+            "WHIR raw query sample count mismatch: sampled {}, expected {}",
+            sampled_bits.len(),
+            expected_sample_bits.len()
+        )));
+    }
+    for (sampled, expected) in sampled_bits.iter().zip(expected_sample_bits) {
+        if sampled.len() != expected.len() {
+            return Err(VerificationError::InvalidProofShape(
+                "WHIR raw query sample bit length mismatch".to_string(),
+            ));
+        }
+        assert_boolean_bits(circuit, expected);
+        for (&a, &b) in sampled.iter().zip(expected) {
+            let diff = circuit.sub(a, b);
+            circuit.assert_zero(diff);
+        }
+    }
+    Ok(())
+}
+
 fn constrain_deduped_query_indices<EF>(
     circuit: &mut CircuitBuilder<EF>,
     sampled_bits: &[Vec<Target>],
@@ -874,6 +898,29 @@ where
         let diff = circuit.sub(multiplicity, one);
         circuit.assert_zero(diff);
     }
+    for deduped in deduped_bits {
+        let mut no_match = circuit.define_const(EF::ONE);
+        for sampled in sampled_bits {
+            let eq = bitvec_equal_indicator(circuit, sampled, deduped);
+            let miss = circuit.sub(one, eq);
+            no_match = circuit.mul(no_match, miss);
+        }
+        circuit.assert_zero(no_match);
+    }
+    for prefix_count in 0..sampled_bits.len() {
+        let mut all_seen = circuit.define_const(EF::ONE);
+        for deduped in deduped_bits {
+            let mut no_match = circuit.define_const(EF::ONE);
+            for sampled in &sampled_bits[..prefix_count] {
+                let eq = bitvec_equal_indicator(circuit, sampled, deduped);
+                let miss = circuit.sub(one, eq);
+                no_match = circuit.mul(no_match, miss);
+            }
+            let seen = circuit.sub(one, no_match);
+            all_seen = circuit.mul(all_seen, seen);
+        }
+        circuit.assert_zero(all_seen);
+    }
 
     Ok(())
 }
@@ -883,7 +930,7 @@ fn sample_stir_query_index_bits_circuit<BF, EF, C>(
     challenger: &mut C,
     domain_size: usize,
     folding_factor: usize,
-    num_queries: usize,
+    sample_count: usize,
 ) -> Result<Vec<Vec<Target>>, CircuitBuilderError>
 where
     BF: PrimeField64,
@@ -892,35 +939,15 @@ where
 {
     let folded_domain_size = domain_size >> folding_factor;
     let domain_size_bits = log2_strict_usize(folded_domain_size);
-    let max_bits_per_call = (BF::bits() - 1).min(WHIR_MAX_SAMPLE_BITS);
-    let total_bits_needed = num_queries * domain_size_bits;
-    let mut queries = Vec::with_capacity(num_queries);
+    let mut queries = Vec::with_capacity(sample_count);
 
-    if total_bits_needed <= max_bits_per_call {
-        let all_bits = challenger.sample_bits(circuit, total_bits_needed)?;
-        for query in 0..num_queries {
-            let start = query * domain_size_bits;
-            queries.push(all_bits[start..start + domain_size_bits].to_vec());
-        }
-    } else {
-        let queries_per_batch = max_bits_per_call / domain_size_bits;
-        if queries_per_batch >= 2 {
-            let mut remaining = num_queries;
-            while remaining > 0 {
-                let batch_size = remaining.min(queries_per_batch);
-                let batch_bits = batch_size * domain_size_bits;
-                let all_bits = challenger.sample_bits(circuit, batch_bits)?;
-                for query in 0..batch_size {
-                    let start = query * domain_size_bits;
-                    queries.push(all_bits[start..start + domain_size_bits].to_vec());
-                }
-                remaining -= batch_size;
-            }
-        } else {
-            for _ in 0..num_queries {
-                queries.push(challenger.sample_bits(circuit, domain_size_bits)?);
-            }
-        }
+    if domain_size_bits == 0 {
+        queries.resize_with(sample_count, Vec::new);
+        return Ok(queries);
+    }
+
+    for _ in 0..sample_count {
+        queries.push(challenger.sample_bits(circuit, domain_size_bits)?);
     }
 
     Ok(queries)
@@ -1007,6 +1034,7 @@ fn verify_whir_stir_challenges_circuit<BF, EF, C, RecMmcs, Comm>(
     params: &RoundConfig<BF>,
     root: &Comm,
     queries: &[WhirQueryOpeningTargets<BF, EF, RecMmcs>],
+    query_sample_index_bits: &[Vec<Target>],
     query_index_bits: &[Vec<Target>],
     pow_witness: Target,
     folding_randomness: &[Target],
@@ -1027,22 +1055,26 @@ where
         let _ = challenger.sample(circuit);
     }
 
-    if queries.len() != query_index_bits.len() {
+    let target_queries = params
+        .num_queries
+        .min(params.domain_size >> params.folding_factor);
+    if queries.len() != target_queries || query_index_bits.len() != target_queries {
         return Err(VerificationError::InvalidProofShape(format!(
-            "WHIR STIR query/opening count mismatch: indices {}, openings {}",
-            query_index_bits.len(),
+            "WHIR STIR query count mismatch: expected {}, openings {}, indices {}",
+            target_queries,
             queries.len(),
+            query_index_bits.len()
         )));
     }
-
     let sampled_bits = sample_stir_query_index_bits_circuit::<BF, EF, C>(
         circuit,
         challenger,
         params.domain_size,
         params.folding_factor,
-        params.num_queries,
+        query_sample_index_bits.len(),
     )?;
-    constrain_deduped_query_indices(circuit, &sampled_bits, query_index_bits)?;
+    constrain_sampled_query_indices(circuit, &sampled_bits, query_sample_index_bits)?;
+    constrain_deduped_query_indices(circuit, query_sample_index_bits, query_index_bits)?;
     let dimensions = vec![Dimensions {
         height: params.domain_size >> params.folding_factor,
         width: 1 << params.folding_factor,
@@ -1271,6 +1303,7 @@ where
                 round_params,
                 &prev_root,
                 &round.queries,
+                &targets.round_query_sample_index_bits[round_index],
                 &targets.round_query_index_bits[round_index],
                 round.pow_witness,
                 round_folding_randomness
@@ -1316,6 +1349,7 @@ where
             &final_round_config,
             &prev_root,
             &targets.proof.final_queries,
+            &targets.final_query_sample_index_bits,
             &targets.final_query_index_bits,
             targets.proof.final_pow_witness,
             round_folding_randomness

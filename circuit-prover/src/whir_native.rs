@@ -9986,6 +9986,12 @@ where
     MakePcs: Fn(usize) -> WhirPcs<EF, F, MT, Challenger, Dft, DIGEST_ELEMS>,
     MakeChallenger: Fn() -> Challenger,
 {
+    // Security invariant: the scalar cumulatives in `proof` are not trusted
+    // metadata. Each section is verified through an auxiliary inverse table,
+    // a zerocheck sumcheck, and terminal column claims that are later opened
+    // against the committed source table. This binds the read bus to the
+    // committed witness/read columns instead of only checking self-consistency
+    // of prover-supplied cumulative values.
     if proof.alpha != alpha || proof.beta != beta {
         return Err(WhirNativeCircuitError::ConstraintViolation(
             "read bus challenge mismatch".to_string(),
@@ -10157,6 +10163,12 @@ where
     MakePcs: Fn(usize) -> WhirPcs<EF, F, MT, Challenger, Dft, DIGEST_ELEMS>,
     MakeChallenger: Fn() -> Challenger,
 {
+    // Build and commit the section-local inverse table for the identity
+    //   inverse(row) * (alpha - witness_id(row) - beta * value(row)) = active(row).
+    // A section sumcheck proves this relation over the same row hypercube used
+    // by the committed source table. The terminal value claim is returned to
+    // the caller so the source-table value column is opened at the sumcheck
+    // terminal point.
     let source_table = tables.get(skeleton.table_index).ok_or_else(|| {
         WhirNativeCircuitError::ConstraintViolation(format!(
             "read bus table {} out of range",

@@ -48,9 +48,15 @@ where
     /// circuit witness data so the circuit can handle native WHIR's
     /// sort-and-dedup query schedule.
     pub round_query_index_bits: Vec<Vec<Vec<EF>>>,
+    /// Raw Fiat-Shamir STIR query draws for each intermediate WHIR round,
+    /// before native WHIR sorting and deduplication.
+    pub round_query_sample_index_bits: Vec<Vec<Vec<EF>>>,
     /// Deduplicated Fiat-Shamir STIR query indices for the final WHIR query
     /// phase.
     pub final_query_index_bits: Vec<Vec<EF>>,
+    /// Raw Fiat-Shamir STIR query draws for the final WHIR query phase,
+    /// before native WHIR sorting and deduplication.
+    pub final_query_sample_index_bits: Vec<Vec<EF>>,
 }
 
 /// Recursive target representation of one multilinear WHIR opening claim.
@@ -108,8 +114,12 @@ pub struct WhirProofVerificationTargets<
     pub proof: WhirProofTargets<F, EF, RecMmcs>,
     /// Private little-endian bits for deduplicated intermediate query indices.
     pub round_query_index_bits: Vec<Vec<Vec<Target>>>,
+    /// Private little-endian bits for raw intermediate query draws.
+    pub round_query_sample_index_bits: Vec<Vec<Vec<Target>>>,
     /// Private little-endian bits for deduplicated final query indices.
     pub final_query_index_bits: Vec<Vec<Target>>,
+    /// Private little-endian bits for raw final query draws.
+    pub final_query_sample_index_bits: Vec<Vec<Target>>,
 }
 
 impl<F, EF, RecMmcs> Recursive<EF>
@@ -171,10 +181,29 @@ where
                         .collect()
                 })
                 .collect(),
+            round_query_sample_index_bits: input
+                .round_query_sample_index_bits
+                .iter()
+                .map(|round| {
+                    round
+                        .iter()
+                        .map(|bits| {
+                            circuit.alloc_public_inputs(bits.len(), "WHIR query sample index bits")
+                        })
+                        .collect()
+                })
+                .collect(),
             final_query_index_bits: input
                 .final_query_index_bits
                 .iter()
                 .map(|bits| circuit.alloc_public_inputs(bits.len(), "WHIR final query index bits"))
+                .collect(),
+            final_query_sample_index_bits: input
+                .final_query_sample_index_bits
+                .iter()
+                .map(|bits| {
+                    circuit.alloc_public_inputs(bits.len(), "WHIR final query sample index bits")
+                })
                 .collect(),
         }
     }
@@ -201,7 +230,22 @@ where
                     .flatten()
                     .copied(),
             )
+            .chain(
+                input
+                    .round_query_sample_index_bits
+                    .iter()
+                    .flatten()
+                    .flatten()
+                    .copied(),
+            )
             .chain(input.final_query_index_bits.iter().flatten().copied())
+            .chain(
+                input
+                    .final_query_sample_index_bits
+                    .iter()
+                    .flatten()
+                    .copied(),
+            )
             .collect()
     }
 
@@ -270,10 +314,29 @@ where
                         .collect()
                 })
                 .collect(),
+            round_query_sample_index_bits: input
+                .round_query_sample_index_bits
+                .iter()
+                .map(|round| {
+                    round
+                        .iter()
+                        .map(|bits| {
+                            circuit.alloc_private_inputs(bits.len(), "WHIR query sample index bits")
+                        })
+                        .collect()
+                })
+                .collect(),
             final_query_index_bits: input
                 .final_query_index_bits
                 .iter()
                 .map(|bits| circuit.alloc_private_inputs(bits.len(), "WHIR final query index bits"))
+                .collect(),
+            final_query_sample_index_bits: input
+                .final_query_sample_index_bits
+                .iter()
+                .map(|bits| {
+                    circuit.alloc_private_inputs(bits.len(), "WHIR final query sample index bits")
+                })
                 .collect(),
         }
     }
@@ -320,7 +383,16 @@ where
                     .flatten()
                     .copied(),
             )
+            .chain(
+                input
+                    .round_query_sample_index_bits
+                    .iter()
+                    .flatten()
+                    .flatten()
+                    .copied(),
+            )
             .chain(input.final_query_index_bits.iter().flatten().copied())
+            .chain(input.final_query_sample_index_bits.iter().flatten().copied())
             .collect()
     }
 }

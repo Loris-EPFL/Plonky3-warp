@@ -113,8 +113,9 @@ impl<F: Field> MulAddFusion<F> {
                     c: None,
                     ..
                 } => {
-                    self.track_backwards_op(idx, *out, *b);
-                    self.insert_def(*out, idx, OpDef::Mul { a: *a, b: *b });
+                    if !self.track_backwards_op(idx, *out, *b) {
+                        self.insert_def(*out, idx, OpDef::Mul { a: *a, b: *b });
+                    }
                 }
                 Op::Alu {
                     kind: AluOpKind::Add,
@@ -123,8 +124,9 @@ impl<F: Field> MulAddFusion<F> {
                     c: None,
                     ..
                 } => {
-                    self.track_backwards_op(idx, *out, *b);
-                    self.insert_def(*out, idx, OpDef::Other);
+                    if !self.track_backwards_op(idx, *out, *b) {
+                        self.insert_def(*out, idx, OpDef::Other);
+                    }
                 }
                 Op::Alu { out, .. } | Op::Public { out, .. } => {
                     self.insert_def(*out, idx, OpDef::Other);
@@ -145,10 +147,13 @@ impl<F: Field> MulAddFusion<F> {
 
     /// If `out` is already defined before `idx`, this is a "backwards" op (e.g. sub
     /// encoded as add). Record that `computed` is produced at `idx`.
-    fn track_backwards_op(&mut self, idx: usize, out: WitnessId, computed: WitnessId) {
+    fn track_backwards_op(&mut self, idx: usize, out: WitnessId, computed: WitnessId) -> bool {
         if !self.is_const(&out) && self.is_backwards(idx, &out) {
             self.backwards_computed.insert(computed, idx);
             self.insert_def(computed, idx, OpDef::Other);
+            true
+        } else {
+            false
         }
     }
 
@@ -497,6 +502,39 @@ mod tests {
             },
             Op::mul(WitnessId(0), WitnessId(1), WitnessId(3)), // output is already a const
             Op::add(WitnessId(3), WitnessId(2), WitnessId(4)),
+        ];
+
+        let fused = MulAddFusion::new(&ops).run(ops.clone());
+        assert_eq!(fused, ops);
+    }
+
+    #[test]
+    fn test_no_fusion_when_mul_output_is_backwards() {
+        let out = WitnessId(0);
+        let a = WitnessId(1);
+        let b = WitnessId(2);
+        let addend = WitnessId(3);
+        let add_out = WitnessId(4);
+
+        let ops: Vec<Op<F>> = vec![
+            Op::Const {
+                out,
+                val: F::from_u64(12),
+            },
+            Op::Const {
+                out: a,
+                val: F::from_u64(3),
+            },
+            Op::Const {
+                out: addend,
+                val: F::ONE,
+            },
+            // Backwards multiplication: `out` is already known, so the runner
+            // computes `b = out / a`. This must not be fused into a MulAdd with
+            // `intermediate_out = out`, because that would try to overwrite
+            // the already-defined witness slot `out` with `a * b`.
+            Op::mul(a, b, out),
+            Op::add(out, addend, add_out),
         ];
 
         let fused = MulAddFusion::new(&ops).run(ops.clone());
