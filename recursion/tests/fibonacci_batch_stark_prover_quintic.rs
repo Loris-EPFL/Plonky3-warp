@@ -10,7 +10,7 @@ use p3_circuit::ops::{
     KoalaBearD1Width16, Poseidon2Config, generate_poseidon2_trace, generate_recompose_trace,
 };
 use p3_circuit_prover::batch_stark_prover::{
-    poseidon2_air_builders_d5, poseidon2_table_provers_d5, recompose_air_builders,
+    PrimitiveTable, poseidon2_air_builders_d5, poseidon2_table_provers_d5, recompose_air_builders,
     recompose_table_provers,
 };
 use p3_circuit_prover::common::{NpoPreprocessor, get_airs_and_degrees_with_prep};
@@ -121,7 +121,12 @@ fn test_fibonacci_batch_verifier_quintic_koala() {
     let batch_stark_proof = prover
         .prove_all_tables(&traces, &circuit_prover_data)
         .unwrap();
-    prover.verify_all_tables(&batch_stark_proof).unwrap();
+    prover
+        .verify_all_tables(
+            &batch_stark_proof,
+            &batch_stark_proof.self_describing_verifier_data(),
+        )
+        .unwrap();
 
     // `prove_all_tables` may reduce lanes for dummy ALU/public tables; `stark_common` always
     // matches the committed AIR layout, so recursive verification consumes it directly.
@@ -153,7 +158,8 @@ fn test_fibonacci_batch_verifier_quintic_koala() {
         .as_ref()
         .map(|g| g.instances.len())
         .unwrap_or(0);
-    let pis: Vec<Vec<F>> = vec![vec![]; num_tables];
+    let mut pis: Vec<Vec<F>> = vec![vec![]; num_tables];
+    pis[PrimitiveTable::Public as usize] = batch_stark_proof.public_values.clone();
 
     let mut circuit_builder = CircuitBuilder::<Challenge>::new();
     let lift = LiftKoalaPermForQuintic::new(default_koalabear_poseidon2_16());
@@ -260,6 +266,9 @@ fn test_fibonacci_batch_verifier_quintic_koala() {
         .expect("Failed to prove verification circuit");
 
     verification_prover
-        .verify_all_tables(&verification_proof)
+        .verify_all_tables(
+            &verification_proof,
+            &verification_proof.self_describing_verifier_data(),
+        )
         .expect("Failed to verify proof of verification circuit");
 }

@@ -909,6 +909,16 @@ where
                 field: "fresh batch proof count",
             });
         }
+        for opening_proof in &proof.fresh_opening_proofs {
+            if let Some(got) = fresh_verifier.batch_opening_len(opening_proof) {
+                if got != self.params.num_shift_queries {
+                    return Err(VerifierError::ShiftQueryCount {
+                        expected: self.params.num_shift_queries,
+                        got,
+                    });
+                }
+            }
+        }
         for answers in &proof.fresh_shift_answers {
             if answers.len() != l1 {
                 return Err(VerifierError::AccumulatorMismatch {
@@ -920,6 +930,16 @@ where
             return Err(VerifierError::AccumulatorMismatch {
                 field: "acc shift answers length",
             });
+        }
+        for opening_proof in &proof.acc_merkle_proofs {
+            if let Some(got) = acc_backend.batch_opening_len(opening_proof) {
+                if got != self.params.num_shift_queries {
+                    return Err(VerifierError::ShiftQueryCount {
+                        expected: self.params.num_shift_queries,
+                        got,
+                    });
+                }
+            }
         }
         for answers in &proof.acc_shift_answers {
             if answers.len() != self.params.num_shift_queries {

@@ -6,13 +6,17 @@
 //! The runtime parameter `lanes` controls how many independent public inputs are packed
 //! side-by-side in a single row of the trace.
 //!
-//! We also allocate 2 preprocessed base-field columns per lane:
-//! - 1 column for the multiplicity (1 for active rows, 0 for padding),
-//! - 1 column for the witness index.
+//! We also allocate `D + 3` preprocessed base-field columns per lane:
+//! - 1 column for the active flag (1 for public rows, 0 for padding),
+//! - 1 column for the witness-bus multiplicity,
+//! - 1 column for the witness index,
+//! - `D` columns for the verifier-pinned public input value.
 //!
 //! # Constraints
 //!
-//! The AIR has no constraints.
+//! The AIR constrains every active public-table value to equal the
+//! verifier-pinned value stored in the preprocessed trace. Padding rows are
+//! disabled by the active flag.
 //!
 //! # Global Interactions
 //!
@@ -24,7 +28,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
-use p3_air::{Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_circuit::tables::PublicTrace;
 use p3_field::{BasedVectorSpace, Field};
 use p3_lookup::LookupAir;
@@ -35,6 +39,10 @@ use tracing::instrument;
 
 use crate::air::column_layout::WITNESS_LOOKUP_PREP_LANE_WIDTH;
 use crate::air::utils::{create_symbolic_variables, get_index_lookups};
+
+const PUBLIC_PREP_ACTIVE: usize = 0;
+const PUBLIC_PREP_LOOKUP: usize = 1;
+const PUBLIC_PREP_VALUE: usize = 1 + WITNESS_LOOKUP_PREP_LANE_WIDTH;
 
 /// PublicAir: vector-valued public input binding with generic extension degree D.
 /// Layout per row: [value[0..D)] repeated `lanes` times.
@@ -112,9 +120,12 @@ impl<F: Field, const D: usize> PublicAir<F, D> {
     }
 
     /// Number of preprocessed base-field columns occupied by a single lane.
-    /// Each lane stores multiplicity + index (see [`WitnessLookupPrepCols`](crate::air::column_layout::WitnessLookupPrepCols)).
+    ///
+    /// Each lane stores `[active, multiplicity, index, value[0..D]]`. The lookup
+    /// helper receives the `multiplicity,index` sub-slice; `active,value` binds
+    /// committed public-table rows to verifier-pinned preprocessed public values.
     pub const fn preprocessed_lane_width() -> usize {
-        WITNESS_LOOKUP_PREP_LANE_WIDTH
+        1 + WITNESS_LOOKUP_PREP_LANE_WIDTH + D
     }
 
     /// Total number of preprocessed columns for this AIR instance.
@@ -189,14 +200,42 @@ impl<F: Field, const D: usize> BaseAir<F> for PublicAir<F, D> {
     fn preprocessed_next_row_columns(&self) -> Vec<usize> {
         vec![]
     }
+
+    fn num_public_values(&self) -> usize {
+        self.num_ops * D
+    }
+
+    fn num_constraints(&self) -> Option<usize> {
+        Some(self.lanes * D)
+    }
+
+    fn max_constraint_degree(&self) -> Option<usize> {
+        Some(3)
+    }
 }
 
 impl<AB: AirBuilder, const D: usize> Air<AB> for PublicAir<AB::F, D>
 where
     AB::F: Field,
 {
-    fn eval(&self, _builder: &mut AB) {
-        // No constraints for public inputs in Stage 1
+    fn eval(&self, builder: &mut AB) {
+        let main = builder.main();
+        let local = main.current_slice();
+        let preprocessed = builder.preprocessed().clone();
+        let prep_local = preprocessed.current_slice();
+
+        for lane in 0..self.lanes {
+            let lane_offset = lane * Self::lane_width();
+            let prep_offset = lane * Self::preprocessed_lane_width();
+
+            for coeff_idx in 0..D {
+                let active = AB::Expr::from(prep_local[prep_offset + PUBLIC_PREP_ACTIVE]);
+                let expected = prep_local[prep_offset + PUBLIC_PREP_VALUE + coeff_idx];
+                builder.assert_zero(
+                    active * (AB::Expr::from(local[lane_offset + coeff_idx]) - expected),
+                );
+            }
+        }
     }
 }
 
@@ -224,7 +263,7 @@ impl<F: Field, const D: usize> LookupAir<F> for PublicAir<F, D> {
 
             let lane_lookup_inputs = get_index_lookups::<F, D>(
                 lane_offset,
-                preprocessed_lane_offset,
+                preprocessed_lane_offset + PUBLIC_PREP_LOOKUP,
                 1,
                 &symbolic_main_local,
                 &preprocessed_local,
@@ -263,10 +302,11 @@ mod tests {
         let values: Vec<F> = (1..=n as u64).map(F::from_u64).collect();
         let indices: Vec<WitnessId> = (0..n as u32).map(WitnessId).collect();
 
-        // Preprocessed values are [ext_mult, index] pairs.
+        // Preprocessed values are [active, ext_mult, index, value] rows.
         let preprocessed_values = indices
             .iter()
-            .flat_map(|idx| [F::ONE, F::from_u64(idx.0 as u64)])
+            .zip(&values)
+            .flat_map(|(idx, &value)| [F::ONE, F::ONE, F::from_u64(idx.0 as u64), value])
             .collect::<Vec<_>>();
 
         let trace = PublicTrace {
@@ -301,13 +341,17 @@ mod tests {
         let preprocessed = air.preprocessed_trace().unwrap();
         let row0 = preprocessed.row_slice(0).unwrap();
         let last_row = preprocessed.row_slice(n - 1).unwrap();
-        // Layout: [ext_mult, index]
-        assert_eq!(row0[0], F::ONE); // ext_mult
-        assert_eq!(last_row[0], F::ONE); // ext_mult
-        assert_eq!(row0[1], F::from_u64(0)); // first index
-        assert_eq!(last_row[1], F::from_u64((n - 1) as u64)); // last index
+        // Layout: [active, ext_mult, index, value]
+        assert_eq!(row0[0], F::ONE); // active
+        assert_eq!(row0[1], F::ONE); // ext_mult
+        assert_eq!(last_row[0], F::ONE); // active
+        assert_eq!(last_row[1], F::ONE); // ext_mult
+        assert_eq!(row0[2], F::from_u64(0)); // first index
+        assert_eq!(last_row[2], F::from_u64((n - 1) as u64)); // last index
+        assert_eq!(row0[3], F::ONE); // first public value
+        assert_eq!(last_row[3], F::from_usize(n)); // last public value
 
-        let pis: Vec<F> = vec![];
+        let pis = trace.values.clone();
 
         let proof = prove_with_preprocessed(&config, &air, matrix, &pis, Some(&prover_data));
         verify_with_preprocessed(&config, &air, &proof, &pis, Some(&verifier_data))
@@ -321,10 +365,11 @@ mod tests {
         let values: Vec<F> = (1..=n as u64).map(F::from_u64).collect();
         let indices: Vec<WitnessId> = (0..n as u32).map(WitnessId).collect();
 
-        // Preprocessed values are [ext_mult, index] pairs.
+        // Preprocessed values are [active, ext_mult, index, value] rows.
         let preprocessed_values = indices
             .iter()
-            .flat_map(|idx| [F::ONE, F::from_u64(idx.0 as u64)])
+            .zip(&values)
+            .flat_map(|(idx, &value)| [F::ONE, F::ONE, F::from_u64(idx.0 as u64), value])
             .collect::<Vec<_>>();
 
         let trace = PublicTrace {
@@ -368,17 +413,21 @@ mod tests {
         assert!(preprocessed.height() == 8);
         for i in 0..n {
             let row = preprocessed.row_slice(i).unwrap();
-            // Layout: [ext_mult, index]
-            assert_eq!(row[0], F::ONE); // ext_mult
-            assert_eq!(row[1], F::from_u64(i as u64)); // witness index
+            // Layout: [active, ext_mult, index, value]
+            assert_eq!(row[0], F::ONE); // active
+            assert_eq!(row[1], F::ONE); // ext_mult
+            assert_eq!(row[2], F::from_u64(i as u64)); // witness index
+            assert_eq!(row[3], F::from_usize(i + 1)); // public value
         }
         for i in n..preprocessed.height() {
             let row = preprocessed.row_slice(i).unwrap();
             assert_eq!(row[0], F::ZERO); // padding
             assert_eq!(row[1], F::ZERO); // padding
+            assert_eq!(row[2], F::ZERO); // padding
+            assert_eq!(row[3], F::ZERO); // padding
         }
 
-        let pis: Vec<F> = vec![];
+        let pis = trace.values.clone();
 
         let proof = prove_with_preprocessed(&config, &air, matrix, &pis, Some(&prover_data));
         verify_with_preprocessed(&config, &air, &proof, &pis, Some(&verifier_data))
@@ -406,10 +455,15 @@ mod tests {
 
         let values = vec![a, b];
         let indices = vec![WitnessId(10), WitnessId(20)];
-        // Preprocessed values are [ext_mult, index] pairs; indices are D-scaled.
+        // Preprocessed values are [active, ext_mult, index, value[0..D]] rows; indices are D-scaled.
         let preprocessed_values = indices
             .iter()
-            .flat_map(|idx| [F::ONE, F::from_u64(idx.0 as u64 * 4)])
+            .zip(&values)
+            .flat_map(|(idx, value)| {
+                let mut row = vec![F::ONE, F::ONE, F::from_u64(idx.0 as u64 * 4)];
+                row.extend_from_slice(value.as_basis_coefficients_slice());
+                row
+            })
             .collect();
 
         let trace = PublicTrace {
@@ -443,14 +497,22 @@ mod tests {
         let prep = air.preprocessed_trace().unwrap();
         let row0 = prep.row_slice(0).unwrap();
         let last_row = prep.row_slice(1).unwrap();
-        // Layout: [ext_mult, index]
-        assert_eq!(row0[0], F::ONE); // ext_mult
-        assert_eq!(last_row[0], F::ONE); // ext_mult
-        // D-scaled: WitnessId(10) → 10 * 4 = 40, WitnessId(20) → 20 * 4 = 80
-        assert_eq!(row0[1], F::from_u64(40));
-        assert_eq!(last_row[1], F::from_u64(80));
+        // Layout: [active, ext_mult, index, value[0..D]]
+        assert_eq!(row0[0], F::ONE); // active
+        assert_eq!(row0[1], F::ONE); // ext_mult
+        assert_eq!(last_row[0], F::ONE); // active
+        assert_eq!(last_row[1], F::ONE); // ext_mult
+        // D-scaled: WitnessId(10) -> 10 * 4 = 40, WitnessId(20) -> 20 * 4 = 80
+        assert_eq!(row0[2], F::from_u64(40));
+        assert_eq!(last_row[2], F::from_u64(80));
+        assert_eq!(&row0[3..7], a.as_basis_coefficients_slice());
+        assert_eq!(&last_row[3..7], b.as_basis_coefficients_slice());
 
-        let pis: Vec<F> = vec![];
+        let pis = trace
+            .values
+            .iter()
+            .flat_map(|value| value.as_basis_coefficients_slice().iter().copied())
+            .collect::<Vec<_>>();
 
         let proof = prove_with_preprocessed(&config, &air, matrix, &pis, Some(&prover_data));
         verify_with_preprocessed(&config, &air, &proof, &pis, Some(&verifier_data))
@@ -472,8 +534,8 @@ mod tests {
 
     #[test]
     fn test_air_constraint_degree() {
-        // 8 ops * 2 columns per op ([ext_mult, index])
-        let air = PublicAir::<F, 1>::new_with_preprocessed(8, 1, vec![F::ZERO; 16]);
+        // 8 ops * 4 columns per op ([active, ext_mult, index, value])
+        let air = PublicAir::<F, 1>::new_with_preprocessed(8, 1, vec![F::ZERO; 32]);
         p3_test_utils::assert_air_constraint_degree!(air, "PublicAir");
     }
 }

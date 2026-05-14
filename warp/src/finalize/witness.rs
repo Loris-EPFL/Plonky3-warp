@@ -139,6 +139,9 @@ where
         if proof.f.len() != n || proof.w.len() != k {
             return Err(FinalizerError::Decider(DeciderError::EncodingMismatch));
         }
+        if instance.alpha.len() != self.code.log_codeword_len() {
+            return Err(FinalizerError::Decider(DeciderError::MlEval));
+        }
 
         // 1. Re-Merkleise f and check the root matches.
         let ext_mmcs = p3_commit::ExtensionMmcs::<F, EF, MT>::new(self.mmcs.clone());

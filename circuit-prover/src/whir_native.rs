@@ -97,6 +97,7 @@ pub enum WhirNativeTableKind {
     Poseidon2,
     Recompose,
     Poseidon2Shift,
+    ReadBusAux,
 }
 
 impl WhirNativeTableKind {
@@ -109,6 +110,7 @@ impl WhirNativeTableKind {
             Self::Poseidon2 => 5,
             Self::Recompose => 6,
             Self::Poseidon2Shift => 7,
+            Self::ReadBusAux => 8,
         }
     }
 }
@@ -212,26 +214,42 @@ pub enum WhirNativeReadBusSectionKind {
     Poseidon2,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "EF: Serialize", deserialize = "EF: Deserialize<'de>"))]
-pub struct WhirNativeReadBusSectionProof<EF> {
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "F: Send + Sync + Clone + Serialize, EF: Serialize, MT::Commitment: Serialize, MT::Proof: Serialize",
+    deserialize = "F: Send + Sync + Clone + Deserialize<'de>, EF: Deserialize<'de>, MT::Commitment: Deserialize<'de>, MT::Proof: Deserialize<'de>"
+))]
+pub struct WhirNativeReadBusSectionProof<F: Send + Sync + Clone, EF, MT: Mmcs<F>> {
     pub table_index: usize,
     pub kind: WhirNativeReadBusSectionKind,
     pub port: u32,
     pub active_reads: usize,
     pub cumulative: EF,
+    pub inverse_commitment: WhirNativeTableCommitment<MT::Commitment>,
+    pub degree: usize,
+    pub sum_challenge: EF,
+    pub zerocheck_point: Vec<EF>,
+    pub terminal_row_point: Vec<EF>,
+    pub terminal_claim: EF,
+    pub sumcheck: WhirNativeSumcheckProof<EF>,
+    pub terminal_value_opening: WhirNativeTerminalColumnClaim<EF>,
+    pub terminal_inverse_opening: WhirNativeTerminalColumnClaim<EF>,
+    pub inverse_opening_proof: WhirNativeTableOpeningProof<F, EF, MT>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(bound(serialize = "EF: Serialize", deserialize = "EF: Deserialize<'de>"))]
-pub struct WhirNativeReadBusProof<EF> {
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "F: Send + Sync + Clone + Serialize, EF: Serialize, MT::Commitment: Serialize, MT::Proof: Serialize",
+    deserialize = "F: Send + Sync + Clone + Deserialize<'de>, EF: Deserialize<'de>, MT::Commitment: Deserialize<'de>, MT::Proof: Deserialize<'de>"
+))]
+pub struct WhirNativeReadBusProof<F: Send + Sync + Clone, EF, MT: Mmcs<F>> {
     pub alpha: EF,
     pub beta: EF,
     pub witness_read_counts: Vec<u32>,
     pub sender_cumulative: EF,
     pub receiver_cumulative: EF,
     pub final_difference: EF,
-    pub sections: Vec<WhirNativeReadBusSectionProof<EF>>,
+    pub sections: Vec<WhirNativeReadBusSectionProof<F, EF, MT>>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -396,7 +414,7 @@ pub struct WhirNativeCircuitProof<F: Send + Sync + Clone, EF, MT: Mmcs<F>> {
     pub opening_mode: WhirNativeOpeningMode,
     pub table_commitments: Vec<WhirNativeTableCommitment<MT::Commitment>>,
     pub column_batch_commitments: Vec<WhirNativeColumnBatchCommitment<MT::Commitment>>,
-    pub read_bus_proof: WhirNativeReadBusProof<EF>,
+    pub read_bus_proof: WhirNativeReadBusProof<F, EF, MT>,
     pub poseidon2_shift_bus_proof: WhirNativePoseidon2ShiftBusProof<F, EF, MT>,
     pub constraint_sumcheck_proofs: Vec<WhirNativeConstraintSumcheckProof<EF>>,
     pub opening_proofs: Vec<WhirNativeTableOpeningProof<F, EF, MT>>,
@@ -1261,13 +1279,20 @@ where
     );
     let read_bus_alpha = read_bus_challenger.sample_algebra_element();
     let read_bus_beta = read_bus_challenger.sample_algebra_element();
-    let read_bus_proof = prove_read_bus::<F, EF>(
-        circuit,
-        &tables,
-        &expected_metadata,
-        read_bus_alpha,
-        read_bus_beta,
-    )?;
+    let (read_bus_proof, read_bus_terminal_claims) =
+        prove_read_bus::<F, EF, MT, Challenger, Dft, MakePcs, MakeChallenger, DIGEST_ELEMS>(
+            circuit,
+            &tables,
+            &expected_metadata,
+            &public_io_digest,
+            &shape_digest,
+            options,
+            commitment_context.clone(),
+            read_bus_alpha,
+            read_bus_beta,
+            &make_pcs,
+            &make_challenger,
+        )?;
     diagnostics.record_phase(
         "read_bus_proof",
         phase_start,
@@ -1306,6 +1331,25 @@ where
     let mut terminal_claims_by_table = vec![Vec::new(); tables.len()];
     let mut terminal_claims_by_batch = vec![Vec::new(); column_batch_layouts.len()];
     let mut total_terminal_claims = 0usize;
+    for claim in read_bus_terminal_claims {
+        let point = Point::new(claim.point.clone());
+        terminal_claims_by_table[claim.table_index].push((point, claim.value));
+        total_terminal_claims += 1;
+        if opening_mode == WhirNativeOpeningMode::ColumnBatched {
+            let (batch_index, column_offset) = column_batch_index_and_offset(
+                &column_batch_layouts,
+                claim.table_index,
+                claim.column,
+            )
+            .ok_or_else(|| {
+                WhirNativeCircuitError::ConstraintViolation(format!(
+                    "missing column batch for read-bus claim table {}, column {}",
+                    claim.table_index, claim.column
+                ))
+            })?;
+            terminal_claims_by_batch[batch_index].push((column_offset, claim));
+        }
+    }
     for claim in poseidon2_shift_terminal_claims {
         let point = Point::new(claim.point.clone());
         terminal_claims_by_table[claim.table_index].push((point, claim.value));
@@ -1834,13 +1878,20 @@ where
     );
     let read_bus_alpha = read_bus_challenger.sample_algebra_element();
     let read_bus_beta = read_bus_challenger.sample_algebra_element();
-    verify_read_bus_proof::<F, EF>(
-        circuit,
-        &expected_metadata,
-        &proof.read_bus_proof,
-        read_bus_alpha,
-        read_bus_beta,
-    )?;
+    let read_bus_terminal_claims =
+        verify_read_bus_proof::<F, EF, MT, Challenger, Dft, MakePcs, MakeChallenger, DIGEST_ELEMS>(
+            circuit,
+            &expected_metadata,
+            &proof.read_bus_proof,
+            &proof.public_io_digest,
+            &proof.shape_digest,
+            options,
+            commitment_context.clone(),
+            read_bus_alpha,
+            read_bus_beta,
+            &make_pcs,
+            &make_challenger,
+        )?;
     let poseidon2_shift_terminal_claims = verify_poseidon2_shift_bus::<
         F,
         EF,
@@ -1862,6 +1913,24 @@ where
     )?;
     let mut terminal_claims_by_table = vec![Vec::new(); expected_metadata.len()];
     let mut terminal_claims_by_batch = vec![Vec::new(); column_batch_layouts.len()];
+    for claim in read_bus_terminal_claims {
+        let point = Point::new(claim.point.clone());
+        terminal_claims_by_table[claim.table_index].push((point, claim.value));
+        if proof.opening_mode == WhirNativeOpeningMode::ColumnBatched {
+            let (batch_index, column_offset) = column_batch_index_and_offset(
+                &column_batch_layouts,
+                claim.table_index,
+                claim.column,
+            )
+            .ok_or_else(|| {
+                WhirNativeCircuitError::ConstraintViolation(format!(
+                    "missing column batch for read-bus claim table {}, column {}",
+                    claim.table_index, claim.column
+                ))
+            })?;
+            terminal_claims_by_batch[batch_index].push((column_offset, claim));
+        }
+    }
     for claim in poseidon2_shift_terminal_claims {
         let point = Point::new(claim.point.clone());
         terminal_claims_by_table[claim.table_index].push((point, claim.value));
@@ -4021,6 +4090,9 @@ where
 }
 
 const WITNESS_TABLE_INDEX: usize = 0;
+const READ_BUS_AUX_WIDTH: usize = 1;
+const READ_BUS_INV_COL: usize = 0;
+const READ_BUS_LOCAL_DEGREE: usize = 3;
 const WITNESS_LOCAL_DEGREE: usize = 3;
 const ALU_LOCAL_DEGREE: usize = 4;
 const WITNESS_WIDTH: usize = 2;
@@ -4543,6 +4615,9 @@ where
         WhirNativeTableKind::Poseidon2Shift => Err(WhirNativeCircuitError::ConstraintViolation(
             "Poseidon2 shift auxiliary tables are not main local-constraint tables".to_string(),
         )),
+        WhirNativeTableKind::ReadBusAux => Err(WhirNativeCircuitError::ConstraintViolation(
+            "read-bus auxiliary tables are not main local-constraint tables".to_string(),
+        )),
     }
 }
 
@@ -4695,6 +4770,9 @@ where
         }
         WhirNativeTableKind::Poseidon2Shift => Err(WhirNativeCircuitError::ConstraintViolation(
             "Poseidon2 shift auxiliary tables are not main local-constraint tables".to_string(),
+        )),
+        WhirNativeTableKind::ReadBusAux => Err(WhirNativeCircuitError::ConstraintViolation(
+            "read-bus auxiliary tables are not main local-constraint tables".to_string(),
         )),
     }
 }
@@ -9625,6 +9703,13 @@ struct ReadBusSectionSkeleton {
     active_reads: usize,
 }
 
+#[derive(Clone, Debug)]
+struct ReadBusSectionStaticData<EF> {
+    witness_ids: Vec<EF>,
+    multiplicities: Vec<EF>,
+    value_column: usize,
+}
+
 fn observe_read_bus_challenge_context<F, Comm, Challenger>(
     challenger: &mut Challenger,
     public_io_digest: &[F],
@@ -9646,62 +9731,195 @@ fn observe_read_bus_challenge_context<F, Comm, Challenger>(
     );
 }
 
-fn prove_read_bus<F, EF>(
+#[allow(clippy::too_many_arguments)]
+fn observe_read_bus_aux_table_context<F, EF, Challenger>(
+    challenger: &mut Challenger,
+    public_io_digest: &[F],
+    shape_digest: &[F],
+    options: WhirNativeCircuitOptions,
+    section: &ReadBusSectionSkeleton,
+    source_metadata: &WhirNativeTableMetadata,
+    aux_metadata: &WhirNativeTableMetadata,
+    alpha: EF,
+    beta: EF,
+) where
+    F: Field,
+    EF: ExtensionField<F>,
+    Challenger: CanObserve<F>,
+{
+    challenger.observe(F::from_u64(0x5242_5553_4155_5843));
+    for &value in public_io_digest {
+        challenger.observe(value);
+    }
+    for &value in shape_digest {
+        challenger.observe(value);
+    }
+    challenger.observe(F::from_u64(options.openings_per_table as u64));
+    challenger.observe(F::from_u64(options.min_num_variables as u64));
+    challenger.observe(F::from_u64(section.table_index as u64));
+    challenger.observe(F::from_u64(section.kind as u64));
+    challenger.observe(F::from_u64(section.port as u64));
+    challenger.observe(F::from_u64(section.active_reads as u64));
+    observe_table_metadata::<F, Challenger>(challenger, section.table_index, source_metadata);
+    observe_table_metadata::<F, Challenger>(challenger, section.table_index, aux_metadata);
+    observe_ef::<F, EF, Challenger>(challenger, alpha);
+    observe_ef::<F, EF, Challenger>(challenger, beta);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn observe_read_bus_section_context<F, EF, Comm, Challenger>(
+    challenger: &mut Challenger,
+    public_io_digest: &[F],
+    shape_digest: &[F],
+    options: WhirNativeCircuitOptions,
+    commitment_context: WhirNativeCommitmentContext<'_, Comm>,
+    section: &ReadBusSectionSkeleton,
+    source_metadata: &WhirNativeTableMetadata,
+    inverse_commitment: &WhirNativeTableCommitment<Comm>,
+    alpha: EF,
+    beta: EF,
+    cumulative: EF,
+) where
+    F: Field,
+    EF: ExtensionField<F>,
+    Comm: Clone,
+    Challenger: CanObserve<F> + CanObserve<Comm>,
+{
+    challenger.observe(F::from_u64(0x5242_5553_5a43_484b));
+    observe_circuit_constraint_context(
+        challenger,
+        public_io_digest,
+        shape_digest,
+        options,
+        commitment_context,
+    );
+    challenger.observe(F::from_u64(section.table_index as u64));
+    challenger.observe(F::from_u64(section.kind as u64));
+    challenger.observe(F::from_u64(section.port as u64));
+    challenger.observe(F::from_u64(section.active_reads as u64));
+    observe_table_metadata::<F, Challenger>(challenger, section.table_index, source_metadata);
+    observe_table_metadata::<F, Challenger>(
+        challenger,
+        section.table_index,
+        &inverse_commitment.metadata,
+    );
+    challenger.observe(inverse_commitment.commitment.clone());
+    observe_ef::<F, EF, Challenger>(challenger, alpha);
+    observe_ef::<F, EF, Challenger>(challenger, beta);
+    observe_ef::<F, EF, Challenger>(challenger, cumulative);
+}
+
+fn sample_read_bus_section_challenges<F, EF, Challenger>(
+    challenger: &mut Challenger,
+    row_variables: usize,
+) -> (EF, Point<EF>)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    Challenger: FieldChallenger<F>,
+{
+    let sum_challenge = challenger.sample_algebra_element();
+    let row_point = (0..row_variables)
+        .map(|_| challenger.sample_algebra_element())
+        .collect();
+    (sum_challenge, Point::new(row_point))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prove_read_bus<F, EF, MT, Challenger, Dft, MakePcs, MakeChallenger, const DIGEST_ELEMS: usize>(
     circuit: &Circuit<EF>,
     tables: &[WhirNativeTableData<EF>],
     metadata: &[WhirNativeTableMetadata],
+    public_io_digest: &[F],
+    shape_digest: &[F],
+    options: WhirNativeCircuitOptions,
+    commitment_context: WhirNativeCommitmentContext<'_, MT::Commitment>,
     alpha: EF,
     beta: EF,
-) -> Result<WhirNativeReadBusProof<EF>, WhirNativeCircuitError>
+    make_pcs: &MakePcs,
+    make_challenger: &MakeChallenger,
+) -> Result<
+    (
+        WhirNativeReadBusProof<F, EF, MT>,
+        Vec<WhirNativeTerminalColumnClaim<EF>>,
+    ),
+    WhirNativeCircuitError,
+>
 where
-    F: Field,
-    EF: ExtensionField<F> + ExtensionField<BabyBear>,
+    F: TwoAdicField + PrimeField64 + Ord + Send + Sync + Serialize + for<'de> Deserialize<'de>,
+    EF: ExtensionField<F>
+        + ExtensionField<BabyBear>
+        + TwoAdicField
+        + Send
+        + Sync
+        + Serialize
+        + for<'de> Deserialize<'de>,
+    MT: Mmcs<F>,
+    MT::Commitment: Clone + PartialEq + Serialize + for<'de> Deserialize<'de>,
+    MT::Proof: Clone + Serialize + for<'de> Deserialize<'de>,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<F>
+        + CanObserve<MT::Commitment>
+        + Clone,
+    Dft: TwoAdicSubgroupDft<F>,
+    MakePcs: Fn(usize) -> WhirPcs<EF, F, MT, Challenger, Dft, DIGEST_ELEMS>,
+    MakeChallenger: Fn() -> Challenger,
 {
     let (witness_read_counts, skeletons) =
         build_expected_read_bus_plan::<F, EF>(circuit, metadata)?;
-    let witness_table = tables.first().ok_or_else(|| {
-        WhirNativeCircuitError::ConstraintViolation("missing witness table".to_string())
-    })?;
-    validate_witness_metadata(&witness_table.metadata)?;
-
-    let mut sender_cumulative = EF::ZERO;
-    let mut sender_active_reads = 0usize;
-    for (wid, &count) in witness_read_counts.iter().enumerate() {
-        if count == 0 {
-            continue;
-        }
-        if wid >= witness_table.metadata.active_rows {
-            return Err(WhirNativeCircuitError::ConstraintViolation(format!(
-                "read count for WitnessId({wid}) exceeds witness table"
-            )));
-        }
-        let value = witness_table.values[wid * witness_table.metadata.padded_width + 1];
-        sender_cumulative += read_bus_contribution::<F, EF>(alpha, beta, wid as u32, value, count)?;
-        sender_active_reads += count as usize;
-    }
-
-    let mut sections = Vec::with_capacity(skeletons.len());
-    sections.push(WhirNativeReadBusSectionProof {
+    let sender_skeleton = ReadBusSectionSkeleton {
         table_index: WITNESS_TABLE_INDEX,
         kind: WhirNativeReadBusSectionKind::WitnessSender,
         port: 0,
-        active_reads: sender_active_reads,
-        cumulative: sender_cumulative,
-    });
-
+        active_reads: witness_read_counts
+            .iter()
+            .map(|&count| count as usize)
+            .sum(),
+    };
+    let all_skeletons = core::iter::once(sender_skeleton)
+        .chain(skeletons.into_iter())
+        .collect::<Vec<_>>();
+    let mut sections = Vec::with_capacity(all_skeletons.len());
+    let mut terminal_value_claims = Vec::new();
+    let mut sender_cumulative = EF::ZERO;
     let mut receiver_cumulative = EF::ZERO;
-    for skeleton in skeletons {
-        let cumulative =
-            prove_read_bus_receiver_section::<F, EF>(circuit, tables, &skeleton, alpha, beta)?;
-        receiver_cumulative += cumulative;
-        sections.push(WhirNativeReadBusSectionProof {
-            table_index: skeleton.table_index,
-            kind: skeleton.kind,
-            port: skeleton.port,
-            active_reads: skeleton.active_reads,
-            cumulative,
-        });
+
+    for skeleton in all_skeletons {
+        let (section, terminal_value_opening) = prove_read_bus_section::<
+            F,
+            EF,
+            MT,
+            Challenger,
+            Dft,
+            MakePcs,
+            MakeChallenger,
+            DIGEST_ELEMS,
+        >(
+            circuit,
+            tables,
+            metadata,
+            &witness_read_counts,
+            public_io_digest,
+            shape_digest,
+            options,
+            commitment_context.clone(),
+            alpha,
+            beta,
+            &skeleton,
+            make_pcs,
+            make_challenger,
+        )?;
+        if skeleton.kind == WhirNativeReadBusSectionKind::WitnessSender {
+            sender_cumulative += section.cumulative;
+        } else {
+            receiver_cumulative += section.cumulative;
+        }
+        terminal_value_claims.push(terminal_value_opening);
+        sections.push(section);
     }
+
     let final_difference = sender_cumulative - receiver_cumulative;
     if final_difference != EF::ZERO {
         return Err(WhirNativeCircuitError::ConstraintViolation(
@@ -9709,27 +9927,64 @@ where
         ));
     }
 
-    Ok(WhirNativeReadBusProof {
-        alpha,
-        beta,
-        witness_read_counts,
-        sender_cumulative,
-        receiver_cumulative,
-        final_difference,
-        sections,
-    })
+    Ok((
+        WhirNativeReadBusProof {
+            alpha,
+            beta,
+            witness_read_counts,
+            sender_cumulative,
+            receiver_cumulative,
+            final_difference,
+            sections,
+        },
+        terminal_value_claims,
+    ))
 }
 
-fn verify_read_bus_proof<F, EF>(
+#[allow(clippy::too_many_arguments)]
+fn verify_read_bus_proof<
+    F,
+    EF,
+    MT,
+    Challenger,
+    Dft,
+    MakePcs,
+    MakeChallenger,
+    const DIGEST_ELEMS: usize,
+>(
     circuit: &Circuit<EF>,
     metadata: &[WhirNativeTableMetadata],
-    proof: &WhirNativeReadBusProof<EF>,
+    proof: &WhirNativeReadBusProof<F, EF, MT>,
+    public_io_digest: &[F],
+    shape_digest: &[F],
+    options: WhirNativeCircuitOptions,
+    commitment_context: WhirNativeCommitmentContext<'_, MT::Commitment>,
     alpha: EF,
     beta: EF,
-) -> Result<(), WhirNativeCircuitError>
+    make_pcs: &MakePcs,
+    make_challenger: &MakeChallenger,
+) -> Result<Vec<WhirNativeTerminalColumnClaim<EF>>, WhirNativeCircuitError>
 where
-    F: Field,
-    EF: ExtensionField<F> + ExtensionField<BabyBear>,
+    F: TwoAdicField + PrimeField64 + Ord + Send + Sync + Serialize + for<'de> Deserialize<'de>,
+    EF: ExtensionField<F>
+        + ExtensionField<BabyBear>
+        + TwoAdicField
+        + Send
+        + Sync
+        + Serialize
+        + for<'de> Deserialize<'de>,
+    MT: Mmcs<F>,
+    MT::Commitment: Clone + PartialEq + Serialize + for<'de> Deserialize<'de>,
+    MT::Proof: Clone + Serialize + for<'de> Deserialize<'de>,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<F>
+        + CanObserve<MT::Commitment>
+        + Clone,
+    Dft: TwoAdicSubgroupDft<F>,
+    MakePcs: Fn(usize) -> WhirPcs<EF, F, MT, Challenger, Dft, DIGEST_ELEMS>,
+    MakeChallenger: Fn() -> Challenger,
 {
     if proof.alpha != alpha || proof.beta != beta {
         return Err(WhirNativeCircuitError::ConstraintViolation(
@@ -9742,27 +9997,26 @@ where
             "read bus witness read counts mismatch".to_string(),
         ));
     }
-    if proof.sections.len() != skeletons.len() + 1 {
+    let sender_skeleton = ReadBusSectionSkeleton {
+        table_index: WITNESS_TABLE_INDEX,
+        kind: WhirNativeReadBusSectionKind::WitnessSender,
+        port: 0,
+        active_reads: expected_counts.iter().map(|&count| count as usize).sum(),
+    };
+    let all_skeletons = core::iter::once(sender_skeleton)
+        .chain(skeletons.into_iter())
+        .collect::<Vec<_>>();
+    if proof.sections.len() != all_skeletons.len() {
         return Err(WhirNativeCircuitError::ConstraintViolation(format!(
             "read bus section count mismatch: expected {}, got {}",
-            skeletons.len() + 1,
+            all_skeletons.len(),
             proof.sections.len()
         )));
     }
-    let sender_section = &proof.sections[0];
-    let expected_sender_reads = expected_counts.iter().map(|&count| count as usize).sum();
-    if sender_section.table_index != WITNESS_TABLE_INDEX
-        || sender_section.kind != WhirNativeReadBusSectionKind::WitnessSender
-        || sender_section.port != 0
-        || sender_section.active_reads != expected_sender_reads
-        || sender_section.cumulative != proof.sender_cumulative
-    {
-        return Err(WhirNativeCircuitError::ConstraintViolation(
-            "read bus sender section mismatch".to_string(),
-        ));
-    }
+    let mut terminal_value_claims = Vec::new();
+    let mut sender_cumulative = EF::ZERO;
     let mut receiver_cumulative = EF::ZERO;
-    for (section, skeleton) in proof.sections.iter().skip(1).zip(&skeletons) {
+    for (section, skeleton) in proof.sections.iter().zip(&all_skeletons) {
         if section.table_index != skeleton.table_index
             || section.kind != skeleton.kind
             || section.port != skeleton.port
@@ -9772,7 +10026,41 @@ where
                 "read bus receiver section mismatch".to_string(),
             ));
         }
-        receiver_cumulative += section.cumulative;
+        let terminal_claim = verify_read_bus_section::<
+            F,
+            EF,
+            MT,
+            Challenger,
+            Dft,
+            MakePcs,
+            MakeChallenger,
+            DIGEST_ELEMS,
+        >(
+            circuit,
+            metadata,
+            &expected_counts,
+            public_io_digest,
+            shape_digest,
+            options,
+            commitment_context.clone(),
+            alpha,
+            beta,
+            section,
+            skeleton,
+            make_pcs,
+            make_challenger,
+        )?;
+        if section.kind == WhirNativeReadBusSectionKind::WitnessSender {
+            sender_cumulative += section.cumulative;
+        } else {
+            receiver_cumulative += section.cumulative;
+        }
+        terminal_value_claims.push(terminal_claim);
+    }
+    if sender_cumulative != proof.sender_cumulative {
+        return Err(WhirNativeCircuitError::ConstraintViolation(
+            "read bus sender cumulative mismatch".to_string(),
+        ));
     }
     if receiver_cumulative != proof.receiver_cumulative {
         return Err(WhirNativeCircuitError::ConstraintViolation(
@@ -9786,31 +10074,890 @@ where
             "read bus final cumulative mismatch".to_string(),
         ));
     }
+    Ok(terminal_value_claims)
+}
+
+#[derive(Clone, Debug)]
+struct ReadBusFoldedSumcheckState<EF> {
+    eq: FoldedColumn<EF>,
+    witness_id: FoldedColumn<EF>,
+    multiplicity: FoldedColumn<EF>,
+    value: FoldedColumn<EF>,
+    inverse: FoldedColumn<EF>,
+    prefix: Vec<EF>,
+    alpha: EF,
+    beta: EF,
+    sum_challenge: EF,
+}
+
+impl<EF> ReadBusFoldedSumcheckState<EF>
+where
+    EF: Field,
+{
+    fn fold(&mut self, challenge: EF) {
+        self.eq.fold(challenge);
+        self.witness_id.fold(challenge);
+        self.multiplicity.fold(challenge);
+        self.value.fold(challenge);
+        self.inverse.fold(challenge);
+        self.prefix.push(challenge);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prove_read_bus_section<
+    F,
+    EF,
+    MT,
+    Challenger,
+    Dft,
+    MakePcs,
+    MakeChallenger,
+    const DIGEST_ELEMS: usize,
+>(
+    circuit: &Circuit<EF>,
+    tables: &[WhirNativeTableData<EF>],
+    metadata: &[WhirNativeTableMetadata],
+    expected_counts: &[u32],
+    public_io_digest: &[F],
+    shape_digest: &[F],
+    options: WhirNativeCircuitOptions,
+    commitment_context: WhirNativeCommitmentContext<'_, MT::Commitment>,
+    alpha: EF,
+    beta: EF,
+    skeleton: &ReadBusSectionSkeleton,
+    make_pcs: &MakePcs,
+    make_challenger: &MakeChallenger,
+) -> Result<
+    (
+        WhirNativeReadBusSectionProof<F, EF, MT>,
+        WhirNativeTerminalColumnClaim<EF>,
+    ),
+    WhirNativeCircuitError,
+>
+where
+    F: TwoAdicField + PrimeField64 + Ord + Send + Sync + Serialize + for<'de> Deserialize<'de>,
+    EF: ExtensionField<F>
+        + ExtensionField<BabyBear>
+        + TwoAdicField
+        + Send
+        + Sync
+        + Serialize
+        + for<'de> Deserialize<'de>,
+    MT: Mmcs<F>,
+    MT::Commitment: Clone + PartialEq + Serialize + for<'de> Deserialize<'de>,
+    MT::Proof: Clone + Serialize + for<'de> Deserialize<'de>,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<F>
+        + CanObserve<MT::Commitment>
+        + Clone,
+    Dft: TwoAdicSubgroupDft<F>,
+    MakePcs: Fn(usize) -> WhirPcs<EF, F, MT, Challenger, Dft, DIGEST_ELEMS>,
+    MakeChallenger: Fn() -> Challenger,
+{
+    let source_table = tables.get(skeleton.table_index).ok_or_else(|| {
+        WhirNativeCircuitError::ConstraintViolation(format!(
+            "read bus table {} out of range",
+            skeleton.table_index
+        ))
+    })?;
+    let source_metadata = metadata.get(skeleton.table_index).ok_or_else(|| {
+        WhirNativeCircuitError::ConstraintViolation(format!(
+            "read bus metadata {} out of range",
+            skeleton.table_index
+        ))
+    })?;
+    if &source_table.metadata != source_metadata {
+        return Err(WhirNativeCircuitError::TableMetadataMismatch {
+            table_index: skeleton.table_index,
+        });
+    }
+    let static_data =
+        read_bus_section_static_data::<F, EF>(circuit, metadata, skeleton, expected_counts)?;
+    let (aux_table, cumulative) = build_read_bus_aux_table::<F, EF>(
+        source_table,
+        &static_data,
+        skeleton,
+        alpha,
+        beta,
+        options,
+    )?;
+    let pcs = make_pcs(aux_table.metadata.num_variables);
+    let mut aux_challenger = make_challenger();
+    observe_read_bus_aux_table_context(
+        &mut aux_challenger,
+        public_io_digest,
+        shape_digest,
+        options,
+        skeleton,
+        source_metadata,
+        &aux_table.metadata,
+        alpha,
+        beta,
+    );
+    let (inverse_commitment_value, inverse_prover_data) = pcs.commit_extension_deferred(
+        RowMajorMatrix::new(aux_table.values.clone(), 1),
+        &mut aux_challenger,
+    );
+    let inverse_commitment = WhirNativeTableCommitment {
+        metadata: aux_table.metadata.clone(),
+        commitment: inverse_commitment_value,
+    };
+
+    let mut section_challenger = make_challenger();
+    observe_read_bus_section_context(
+        &mut section_challenger,
+        public_io_digest,
+        shape_digest,
+        options,
+        commitment_context,
+        skeleton,
+        source_metadata,
+        &inverse_commitment,
+        alpha,
+        beta,
+        cumulative,
+    );
+    let (sum_challenge, zerocheck_point) = sample_read_bus_section_challenges::<F, EF, Challenger>(
+        &mut section_challenger,
+        whir_native_table_row_variables(source_metadata),
+    );
+    let mut folded_state = build_read_bus_folded_sumcheck_state::<F, EF>(
+        source_table,
+        &aux_table,
+        &static_data,
+        &zerocheck_point,
+        alpha,
+        beta,
+        sum_challenge,
+    )?;
+    let claimed_sum = sum_challenge * cumulative;
+    let (sumcheck, terminal_row_point, terminal_claim) =
+        prove_row_folded_sumcheck_by_suffix_into_parallel::<F, EF, Challenger, _, _, _>(
+            whir_native_table_row_variables(source_metadata),
+            READ_BUS_LOCAL_DEGREE,
+            claimed_sum,
+            &mut section_challenger,
+            &mut folded_state,
+            |state, _round, suffix, degree, out| {
+                read_bus_folded_suffix_evals_into::<F, EF>(state, suffix, degree, out)
+            },
+            |state, challenge| state.fold(challenge),
+        )?;
+
+    let terminal_value_opening = terminal_column_claims_for_table::<F, EF>(
+        skeleton.table_index,
+        source_table,
+        &terminal_row_point,
+        &[static_data.value_column],
+    )?
+    .into_iter()
+    .next()
+    .ok_or_else(|| {
+        WhirNativeCircuitError::ConstraintViolation(
+            "missing read-bus terminal value opening".to_string(),
+        )
+    })?;
+    let terminal_inverse_opening = terminal_column_claims_for_table::<F, EF>(
+        skeleton.table_index,
+        &aux_table,
+        &terminal_row_point,
+        &[READ_BUS_INV_COL],
+    )?
+    .into_iter()
+    .next()
+    .ok_or_else(|| {
+        WhirNativeCircuitError::ConstraintViolation(
+            "missing read-bus terminal inverse opening".to_string(),
+        )
+    })?;
+    let terminal_constraint = eval_read_bus_constraint_from_values::<F, EF>(
+        source_metadata,
+        &static_data,
+        &zerocheck_point,
+        &terminal_row_point,
+        terminal_value_opening.value,
+        terminal_inverse_opening.value,
+        alpha,
+        beta,
+        sum_challenge,
+    )?;
+    if terminal_constraint != terminal_claim {
+        return Err(WhirNativeCircuitError::ConstraintViolation(
+            "read-bus prover terminal claim is inconsistent".to_string(),
+        ));
+    }
+    let inverse_point = Point::new(terminal_inverse_opening.point.clone());
+    let inverse_opening_proof = open_table_at_points::<F, EF, MT, Challenger, Dft, DIGEST_ELEMS>(
+        &pcs,
+        inverse_prover_data,
+        skeleton.table_index,
+        vec![inverse_point],
+        &mut aux_challenger,
+    );
+    let section = WhirNativeReadBusSectionProof {
+        table_index: skeleton.table_index,
+        kind: skeleton.kind,
+        port: skeleton.port,
+        active_reads: skeleton.active_reads,
+        cumulative,
+        inverse_commitment,
+        degree: READ_BUS_LOCAL_DEGREE,
+        sum_challenge,
+        zerocheck_point: zerocheck_point.as_slice().to_vec(),
+        terminal_row_point: terminal_row_point.as_slice().to_vec(),
+        terminal_claim,
+        sumcheck,
+        terminal_value_opening: terminal_value_opening.clone(),
+        terminal_inverse_opening,
+        inverse_opening_proof,
+    };
+    Ok((section, terminal_value_opening))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_read_bus_section<
+    F,
+    EF,
+    MT,
+    Challenger,
+    Dft,
+    MakePcs,
+    MakeChallenger,
+    const DIGEST_ELEMS: usize,
+>(
+    circuit: &Circuit<EF>,
+    metadata: &[WhirNativeTableMetadata],
+    expected_counts: &[u32],
+    public_io_digest: &[F],
+    shape_digest: &[F],
+    options: WhirNativeCircuitOptions,
+    commitment_context: WhirNativeCommitmentContext<'_, MT::Commitment>,
+    alpha: EF,
+    beta: EF,
+    section: &WhirNativeReadBusSectionProof<F, EF, MT>,
+    skeleton: &ReadBusSectionSkeleton,
+    make_pcs: &MakePcs,
+    make_challenger: &MakeChallenger,
+) -> Result<WhirNativeTerminalColumnClaim<EF>, WhirNativeCircuitError>
+where
+    F: TwoAdicField + PrimeField64 + Ord + Send + Sync + Serialize + for<'de> Deserialize<'de>,
+    EF: ExtensionField<F>
+        + ExtensionField<BabyBear>
+        + TwoAdicField
+        + Send
+        + Sync
+        + Serialize
+        + for<'de> Deserialize<'de>,
+    MT: Mmcs<F>,
+    MT::Commitment: Clone + PartialEq + Serialize + for<'de> Deserialize<'de>,
+    MT::Proof: Clone + Serialize + for<'de> Deserialize<'de>,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<F>
+        + CanObserve<MT::Commitment>
+        + Clone,
+    Dft: TwoAdicSubgroupDft<F>,
+    MakePcs: Fn(usize) -> WhirPcs<EF, F, MT, Challenger, Dft, DIGEST_ELEMS>,
+    MakeChallenger: Fn() -> Challenger,
+{
+    let source_metadata = metadata.get(skeleton.table_index).ok_or_else(|| {
+        WhirNativeCircuitError::ConstraintViolation(format!(
+            "missing read-bus metadata for table {}",
+            skeleton.table_index
+        ))
+    })?;
+    let static_data =
+        read_bus_section_static_data::<F, EF>(circuit, metadata, skeleton, expected_counts)?;
+    let expected_aux_metadata = read_bus_aux_metadata(source_metadata, skeleton, options);
+    if section.inverse_commitment.metadata != expected_aux_metadata
+        || section.degree != READ_BUS_LOCAL_DEGREE
+    {
+        return Err(WhirNativeCircuitError::ConstraintViolation(
+            "read-bus section header mismatch".to_string(),
+        ));
+    }
+
+    let mut section_challenger = make_challenger();
+    observe_read_bus_section_context(
+        &mut section_challenger,
+        public_io_digest,
+        shape_digest,
+        options,
+        commitment_context,
+        skeleton,
+        source_metadata,
+        &section.inverse_commitment,
+        alpha,
+        beta,
+        section.cumulative,
+    );
+    let (sum_challenge, zerocheck_point) = sample_read_bus_section_challenges::<F, EF, Challenger>(
+        &mut section_challenger,
+        whir_native_table_row_variables(source_metadata),
+    );
+    if section.sum_challenge != sum_challenge
+        || section.zerocheck_point.as_slice() != zerocheck_point.as_slice()
+    {
+        return Err(WhirNativeCircuitError::ConstraintViolation(
+            "read-bus section challenge mismatch".to_string(),
+        ));
+    }
+    let claimed_sum = sum_challenge * section.cumulative;
+    let (terminal_row_point, terminal_claim) = verify_sumcheck::<F, EF, Challenger>(
+        &section.sumcheck,
+        whir_native_table_row_variables(source_metadata),
+        claimed_sum,
+        &mut section_challenger,
+    )?;
+    if section.terminal_row_point.as_slice() != terminal_row_point.as_slice()
+        || section.terminal_claim != terminal_claim
+    {
+        return Err(WhirNativeCircuitError::ConstraintViolation(
+            "read-bus sumcheck terminal mismatch".to_string(),
+        ));
+    }
+
+    let value_claim = extract_read_bus_value_claim::<F, EF, MT>(
+        section,
+        source_metadata,
+        &static_data,
+        &terminal_row_point,
+    )?;
+    let (inverse_value, inverse_claim) = extract_read_bus_inverse_claim::<F, EF, MT>(
+        section,
+        &section.inverse_commitment.metadata,
+        &terminal_row_point,
+    )?;
+    let terminal_constraint = eval_read_bus_constraint_from_values::<F, EF>(
+        source_metadata,
+        &static_data,
+        &zerocheck_point,
+        &terminal_row_point,
+        value_claim.value,
+        inverse_value,
+        alpha,
+        beta,
+        sum_challenge,
+    )?;
+    if terminal_constraint != terminal_claim {
+        return Err(WhirNativeCircuitError::ConstraintViolation(
+            "read-bus terminal claim is inconsistent".to_string(),
+        ));
+    }
+
+    let pcs = make_pcs(section.inverse_commitment.metadata.num_variables);
+    let mut aux_challenger = make_challenger();
+    observe_read_bus_aux_table_context(
+        &mut aux_challenger,
+        public_io_digest,
+        shape_digest,
+        options,
+        skeleton,
+        source_metadata,
+        &section.inverse_commitment.metadata,
+        alpha,
+        beta,
+    );
+    verify_table_opening_claims_after_context::<F, EF, MT, Challenger, Dft, DIGEST_ELEMS>(
+        &pcs,
+        &section.inverse_commitment,
+        &section.inverse_opening_proof,
+        skeleton.table_index,
+        &[inverse_claim],
+        &mut aux_challenger,
+    )?;
+    Ok(value_claim)
+}
+
+fn read_bus_aux_metadata(
+    source_metadata: &WhirNativeTableMetadata,
+    section: &ReadBusSectionSkeleton,
+    options: WhirNativeCircuitOptions,
+) -> WhirNativeTableMetadata {
+    let mut padded_width = READ_BUS_AUX_WIDTH.next_power_of_two();
+    while padded_width * source_metadata.padded_height < (1usize << options.min_num_variables) {
+        padded_width *= 2;
+    }
+    WhirNativeTableMetadata {
+        kind: WhirNativeTableKind::ReadBusAux,
+        op_type: format!("read_bus/{:?}/{}", section.kind, section.port),
+        width: READ_BUS_AUX_WIDTH,
+        padded_width,
+        active_rows: source_metadata.active_rows,
+        padded_height: source_metadata.padded_height,
+        num_variables: (padded_width * source_metadata.padded_height).ilog2() as usize,
+        column_layout_version: TABLE_LAYOUT_VERSION,
+    }
+}
+
+fn pack_read_bus_aux_rows<EF>(
+    source_metadata: &WhirNativeTableMetadata,
+    section: &ReadBusSectionSkeleton,
+    rows: Vec<EF>,
+    options: WhirNativeCircuitOptions,
+) -> Result<WhirNativeTableData<EF>, WhirNativeCircuitError>
+where
+    EF: Field,
+{
+    if rows.len() != source_metadata.active_rows {
+        return Err(WhirNativeCircuitError::ConstraintViolation(format!(
+            "read-bus inverse row count mismatch: expected {}, got {}",
+            source_metadata.active_rows,
+            rows.len()
+        )));
+    }
+    let metadata = read_bus_aux_metadata(source_metadata, section, options);
+    let mut values = EF::zero_vec(metadata.padded_width * metadata.padded_height);
+    for (row_index, &row) in rows.iter().enumerate() {
+        values[row_index * metadata.padded_width + READ_BUS_INV_COL] = row;
+    }
+    Ok(WhirNativeTableData { metadata, values })
+}
+
+fn build_read_bus_aux_table<F, EF>(
+    source_table: &WhirNativeTableData<EF>,
+    static_data: &ReadBusSectionStaticData<EF>,
+    section: &ReadBusSectionSkeleton,
+    alpha: EF,
+    beta: EF,
+    options: WhirNativeCircuitOptions,
+) -> Result<(WhirNativeTableData<EF>, EF), WhirNativeCircuitError>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    if static_data.witness_ids.len() != source_table.metadata.padded_height
+        || static_data.multiplicities.len() != source_table.metadata.padded_height
+    {
+        return Err(WhirNativeCircuitError::ConstraintViolation(
+            "read-bus static column length mismatch".to_string(),
+        ));
+    }
+    if static_data.value_column >= source_table.metadata.width {
+        return Err(WhirNativeCircuitError::ConstraintViolation(format!(
+            "read-bus value column {} out of width {}",
+            static_data.value_column, source_table.metadata.width
+        )));
+    }
+    if static_data.multiplicities[source_table.metadata.active_rows..]
+        .iter()
+        .any(|&multiplicity| multiplicity != EF::ZERO)
+    {
+        return Err(WhirNativeCircuitError::ConstraintViolation(
+            "read-bus multiplicity outside active rows".to_string(),
+        ));
+    }
+
+    let mut rows = Vec::with_capacity(source_table.metadata.active_rows);
+    let mut cumulative = EF::ZERO;
+    for row in 0..source_table.metadata.active_rows {
+        let multiplicity = static_data.multiplicities[row];
+        let inverse = if multiplicity == EF::ZERO {
+            EF::ZERO
+        } else {
+            let value = source_table.values
+                [row * source_table.metadata.padded_width + static_data.value_column];
+            let key = static_data.witness_ids[row] + beta * value;
+            let denominator = alpha - key;
+            multiplicity
+                * denominator.try_inverse().ok_or_else(|| {
+                    WhirNativeCircuitError::ConstraintViolation(
+                        "read bus challenge collision with witness key".to_string(),
+                    )
+                })?
+        };
+        cumulative += inverse;
+        rows.push(inverse);
+    }
+    let aux_table = pack_read_bus_aux_rows(&source_table.metadata, section, rows, options)?;
+    Ok((aux_table, cumulative))
+}
+
+fn build_read_bus_folded_sumcheck_state<F, EF>(
+    source_table: &WhirNativeTableData<EF>,
+    aux_table: &WhirNativeTableData<EF>,
+    static_data: &ReadBusSectionStaticData<EF>,
+    zerocheck_point: &Point<EF>,
+    alpha: EF,
+    beta: EF,
+    sum_challenge: EF,
+) -> Result<ReadBusFoldedSumcheckState<EF>, WhirNativeCircuitError>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    if source_table.metadata.padded_height != aux_table.metadata.padded_height {
+        return Err(WhirNativeCircuitError::ConstraintViolation(
+            "read-bus source/inverse height mismatch".to_string(),
+        ));
+    }
+    let eq = FoldedColumn::new(
+        Poly::<EF>::new_from_point(zerocheck_point.as_slice(), EF::ONE).into_evals(),
+    );
+    let value = FoldedColumn::new(table_column_values(source_table, static_data.value_column)?);
+    let inverse = FoldedColumn::new(table_column_values(aux_table, READ_BUS_INV_COL)?);
+    Ok(ReadBusFoldedSumcheckState {
+        eq,
+        witness_id: FoldedColumn::new(static_data.witness_ids.clone()),
+        multiplicity: FoldedColumn::new(static_data.multiplicities.clone()),
+        value,
+        inverse,
+        prefix: Vec::new(),
+        alpha,
+        beta,
+        sum_challenge,
+    })
+}
+
+fn read_bus_folded_suffix_evals_into<F, EF>(
+    state: &ReadBusFoldedSumcheckState<EF>,
+    suffix: usize,
+    degree: usize,
+    out: &mut [EF],
+) -> Result<(), WhirNativeCircuitError>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    if out.len() != degree + 1 {
+        return Err(WhirNativeCircuitError::ConstraintViolation(format!(
+            "read-bus suffix output length mismatch: expected {}, got {}",
+            degree + 1,
+            out.len()
+        )));
+    }
+    for (point, out) in out.iter_mut().enumerate() {
+        let eq = state.eq.line_value::<F>(suffix, point);
+        let witness_id = state.witness_id.line_value::<F>(suffix, point);
+        let multiplicity = state.multiplicity.line_value::<F>(suffix, point);
+        let value = state.value.line_value::<F>(suffix, point);
+        let inverse = state.inverse.line_value::<F>(suffix, point);
+        *out = eval_read_bus_constraint_from_folds(
+            eq,
+            witness_id,
+            multiplicity,
+            value,
+            inverse,
+            state.alpha,
+            state.beta,
+            state.sum_challenge,
+        );
+    }
     Ok(())
 }
 
-fn read_bus_contribution<F, EF>(
+fn eval_read_bus_constraint_from_folds<EF>(
+    eq: EF,
+    witness_id: EF,
+    multiplicity: EF,
+    value: EF,
+    inverse: EF,
     alpha: EF,
     beta: EF,
-    witness_id: u32,
+    sum_challenge: EF,
+) -> EF
+where
+    EF: Field,
+{
+    let key = witness_id + beta * value;
+    let inverse_constraint = (alpha - key) * inverse - multiplicity;
+    eq * inverse_constraint + sum_challenge * inverse
+}
+
+#[allow(clippy::too_many_arguments)]
+fn eval_read_bus_constraint_from_values<F, EF>(
+    metadata: &WhirNativeTableMetadata,
+    static_data: &ReadBusSectionStaticData<EF>,
+    zerocheck_point: &Point<EF>,
+    row_point: &Point<EF>,
     value: EF,
-    multiplicity: u32,
+    inverse: EF,
+    alpha: EF,
+    beta: EF,
+    sum_challenge: EF,
 ) -> Result<EF, WhirNativeCircuitError>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    if multiplicity == 0 {
-        return Ok(EF::ZERO);
-    }
-    let key = ef_from_u64::<F, EF>(witness_id as u64) + beta * value;
-    let denominator = alpha - key;
-    let inverse = denominator.try_inverse().ok_or_else(|| {
-        WhirNativeCircuitError::ConstraintViolation(
-            "read bus challenge collision with witness key".to_string(),
-        )
+    validate_row_point(metadata.padded_height, row_point)?;
+    let witness_id = Poly::eval_ext_slice::<F>(&static_data.witness_ids, row_point);
+    let multiplicity = Poly::eval_ext_slice::<F>(&static_data.multiplicities, row_point);
+    let eq = eq_eval_ext(zerocheck_point, row_point);
+    Ok(eval_read_bus_constraint_from_folds(
+        eq,
+        witness_id,
+        multiplicity,
+        value,
+        inverse,
+        alpha,
+        beta,
+        sum_challenge,
+    ))
+}
+
+fn read_bus_section_static_data<F, EF>(
+    circuit: &Circuit<EF>,
+    metadata: &[WhirNativeTableMetadata],
+    section: &ReadBusSectionSkeleton,
+    expected_counts: &[u32],
+) -> Result<ReadBusSectionStaticData<EF>, WhirNativeCircuitError>
+where
+    F: Field,
+    EF: ExtensionField<F> + ExtensionField<BabyBear>,
+{
+    let source_metadata = metadata.get(section.table_index).ok_or_else(|| {
+        WhirNativeCircuitError::ConstraintViolation(format!(
+            "read-bus metadata {} out of range",
+            section.table_index
+        ))
     })?;
-    Ok(ef_from_u64::<F, EF>(multiplicity as u64) * inverse)
+    match section.kind {
+        WhirNativeReadBusSectionKind::WitnessSender => {
+            validate_witness_metadata(source_metadata)?;
+            let witness_ids = row_index_values::<F, EF>(source_metadata.padded_height);
+            let mut multiplicities = EF::zero_vec(source_metadata.padded_height);
+            for (row, &count) in expected_counts.iter().enumerate() {
+                if row >= source_metadata.active_rows {
+                    if count != 0 {
+                        return Err(WhirNativeCircuitError::ConstraintViolation(format!(
+                            "read count for WitnessId({row}) exceeds witness table"
+                        )));
+                    }
+                    continue;
+                }
+                multiplicities[row] = ef_from_u64::<F, EF>(count as u64);
+            }
+            Ok(ReadBusSectionStaticData {
+                witness_ids,
+                multiplicities,
+                value_column: 1,
+            })
+        }
+        _ => {
+            let witness_ids_u32 =
+                read_bus_receiver_witness_ids::<F, EF>(circuit, metadata, section)?;
+            let active_reads = witness_ids_u32
+                .iter()
+                .filter(|&&wid| wid != MISSING_WITNESS_ID)
+                .count();
+            if active_reads != section.active_reads {
+                return Err(WhirNativeCircuitError::ConstraintViolation(
+                    "read-bus active read count mismatch".to_string(),
+                ));
+            }
+            let witness_ids =
+                static_u32_column_values::<F, EF>(source_metadata.padded_height, &witness_ids_u32)?;
+            let mut multiplicities = EF::zero_vec(source_metadata.padded_height);
+            for (row, &wid) in witness_ids_u32.iter().enumerate() {
+                if wid != MISSING_WITNESS_ID {
+                    multiplicities[row] = EF::ONE;
+                }
+            }
+            Ok(ReadBusSectionStaticData {
+                witness_ids,
+                multiplicities,
+                value_column: read_bus_receiver_value_column(metadata, section)?,
+            })
+        }
+    }
+}
+
+fn read_bus_receiver_value_column(
+    metadata: &[WhirNativeTableMetadata],
+    section: &ReadBusSectionSkeleton,
+) -> Result<usize, WhirNativeCircuitError> {
+    let table_metadata = metadata.get(section.table_index).ok_or_else(|| {
+        WhirNativeCircuitError::ConstraintViolation(format!(
+            "read bus table {} out of range",
+            section.table_index
+        ))
+    })?;
+    match section.kind {
+        WhirNativeReadBusSectionKind::WitnessSender => Ok(1),
+        WhirNativeReadBusSectionKind::KnownRows => {
+            if !matches!(
+                table_metadata.kind,
+                WhirNativeTableKind::Const | WhirNativeTableKind::Public
+            ) {
+                return Err(WhirNativeCircuitError::ConstraintViolation(
+                    "known-row read section mapped to wrong table".to_string(),
+                ));
+            }
+            Ok(KNOWN_ROW_READ_VALUE_COL)
+        }
+        WhirNativeReadBusSectionKind::Alu => alu_read_column_for_port(section.port as usize),
+        WhirNativeReadBusSectionKind::Recompose => {
+            let d = recompose_table_degree_from_metadata(table_metadata)?;
+            let port = section.port as usize;
+            let value_start = 3 + d;
+            if port < d {
+                Ok(value_start + port)
+            } else if port == d {
+                Ok(value_start + d)
+            } else {
+                Err(WhirNativeCircuitError::ConstraintViolation(format!(
+                    "bad recompose read port {port}"
+                )))
+            }
+        }
+        WhirNativeReadBusSectionKind::Poseidon2 => {
+            Ok(P2_BB_D4_WIDTH16_READ_OFFSET + section.port as usize)
+        }
+    }
+}
+
+fn read_bus_receiver_witness_ids<F, EF>(
+    circuit: &Circuit<EF>,
+    metadata: &[WhirNativeTableMetadata],
+    section: &ReadBusSectionSkeleton,
+) -> Result<Vec<u32>, WhirNativeCircuitError>
+where
+    F: Field,
+    EF: ExtensionField<F> + ExtensionField<BabyBear>,
+{
+    let table_metadata = metadata.get(section.table_index).ok_or_else(|| {
+        WhirNativeCircuitError::ConstraintViolation(format!(
+            "read bus table {} out of range",
+            section.table_index
+        ))
+    })?;
+    match section.kind {
+        WhirNativeReadBusSectionKind::WitnessSender => {
+            Err(WhirNativeCircuitError::ConstraintViolation(
+                "sender section does not have receiver witness ids".to_string(),
+            ))
+        }
+        WhirNativeReadBusSectionKind::KnownRows => match table_metadata.kind {
+            WhirNativeTableKind::Const => Ok(expected_const_witness_ids_from_circuit(circuit)),
+            WhirNativeTableKind::Public => Ok(expected_public_witness_ids_from_circuit(circuit)),
+            _ => Err(WhirNativeCircuitError::ConstraintViolation(
+                "known-row read section mapped to wrong table".to_string(),
+            )),
+        },
+        WhirNativeReadBusSectionKind::Alu => {
+            let rows = expected_alu_rows_from_circuit(circuit);
+            let port = section.port as usize;
+            Ok(rows
+                .iter()
+                .map(|row| alu_active_read_witness_id(row, port).unwrap_or(MISSING_WITNESS_ID))
+                .collect())
+        }
+        WhirNativeReadBusSectionKind::Recompose => {
+            let rows = expected_recompose_rows_from_circuit(circuit, &table_metadata.op_type)?;
+            let d = recompose_degree(&rows)?;
+            let port = section.port as usize;
+            if port > d {
+                return Err(WhirNativeCircuitError::ConstraintViolation(format!(
+                    "bad recompose read port {port}"
+                )));
+            }
+            Ok(rows
+                .iter()
+                .map(|row| {
+                    if port < d {
+                        row.input_wids[port]
+                    } else {
+                        row.output_wid
+                    }
+                })
+                .collect())
+        }
+        WhirNativeReadBusSectionKind::Poseidon2 => {
+            let rows = expected_poseidon2_rows_from_circuit(circuit, &table_metadata.op_type)?;
+            let direction_bit_witness_ids =
+                expected_poseidon2_direction_bit_witness_ids_from_circuit(
+                    circuit,
+                    &table_metadata.op_type,
+                )?;
+            let port = section.port as usize;
+            Ok(rows
+                .iter()
+                .enumerate()
+                .map(|(row_index, row)| {
+                    poseidon2_active_read_witness_id(
+                        row,
+                        &direction_bit_witness_ids,
+                        row_index,
+                        port,
+                    )
+                    .unwrap_or(MISSING_WITNESS_ID)
+                })
+                .collect())
+        }
+    }
+}
+
+fn recompose_table_degree_from_metadata(
+    metadata: &WhirNativeTableMetadata,
+) -> Result<usize, WhirNativeCircuitError> {
+    if metadata.kind != WhirNativeTableKind::Recompose || metadata.width < 4 {
+        return Err(WhirNativeCircuitError::ConstraintViolation(
+            "recompose read section mapped to wrong table".to_string(),
+        ));
+    }
+    let d = (metadata.width - 4) / 2;
+    if metadata.width != 4 + 2 * d {
+        return Err(WhirNativeCircuitError::ConstraintViolation(format!(
+            "bad recompose table width {}",
+            metadata.width
+        )));
+    }
+    Ok(d)
+}
+
+fn extract_read_bus_value_claim<F, EF, MT>(
+    section: &WhirNativeReadBusSectionProof<F, EF, MT>,
+    metadata: &WhirNativeTableMetadata,
+    static_data: &ReadBusSectionStaticData<EF>,
+    terminal_row_point: &Point<EF>,
+) -> Result<WhirNativeTerminalColumnClaim<EF>, WhirNativeCircuitError>
+where
+    F: Field + Send + Sync + Clone,
+    EF: ExtensionField<F>,
+    MT: Mmcs<F>,
+{
+    validate_terminal_claim(
+        &section.terminal_value_opening,
+        section.table_index,
+        metadata,
+        terminal_row_point,
+        static_data.value_column,
+        0,
+        "read-bus value",
+    )?;
+    Ok(section.terminal_value_opening.clone())
+}
+
+fn extract_read_bus_inverse_claim<F, EF, MT>(
+    section: &WhirNativeReadBusSectionProof<F, EF, MT>,
+    metadata: &WhirNativeTableMetadata,
+    terminal_row_point: &Point<EF>,
+) -> Result<(EF, (Point<EF>, EF)), WhirNativeCircuitError>
+where
+    F: Field + Send + Sync + Clone,
+    EF: ExtensionField<F>,
+    MT: Mmcs<F>,
+{
+    validate_terminal_claim(
+        &section.terminal_inverse_opening,
+        section.table_index,
+        metadata,
+        terminal_row_point,
+        READ_BUS_INV_COL,
+        0,
+        "read-bus inverse",
+    )?;
+    let point =
+        whir_native_table_column_point::<F, EF>(metadata, terminal_row_point, READ_BUS_INV_COL)?;
+    Ok((
+        section.terminal_inverse_opening.value,
+        (point, section.terminal_inverse_opening.value),
+    ))
 }
 
 fn build_expected_read_bus_plan<F, EF>(
@@ -9919,6 +11066,7 @@ where
                 }
             }
             WhirNativeTableKind::Poseidon2Shift => {}
+            WhirNativeTableKind::ReadBusAux => {}
         }
     }
     Ok((counts, sections))
@@ -9992,139 +11140,6 @@ fn poseidon2_active_read_witness_id(
             .then(|| direction_bit_witness_ids[row_index]);
     }
     None
-}
-
-fn prove_read_bus_receiver_section<F, EF>(
-    circuit: &Circuit<EF>,
-    tables: &[WhirNativeTableData<EF>],
-    skeleton: &ReadBusSectionSkeleton,
-    alpha: EF,
-    beta: EF,
-) -> Result<EF, WhirNativeCircuitError>
-where
-    F: Field,
-    EF: ExtensionField<F> + ExtensionField<BabyBear>,
-{
-    let table = tables.get(skeleton.table_index).ok_or_else(|| {
-        WhirNativeCircuitError::ConstraintViolation(format!(
-            "read bus table {} out of range",
-            skeleton.table_index
-        ))
-    })?;
-    match skeleton.kind {
-        WhirNativeReadBusSectionKind::WitnessSender => Ok(EF::ZERO),
-        WhirNativeReadBusSectionKind::KnownRows => {
-            let witness_ids = match table.metadata.kind {
-                WhirNativeTableKind::Const => expected_const_witness_ids_from_circuit(circuit),
-                WhirNativeTableKind::Public => expected_public_witness_ids_from_circuit(circuit),
-                _ => {
-                    return Err(WhirNativeCircuitError::ConstraintViolation(
-                        "known-row read section mapped to wrong table".to_string(),
-                    ));
-                }
-            };
-            read_bus_cumulative_for_rows::<F, EF>(
-                table,
-                &witness_ids,
-                KNOWN_ROW_READ_VALUE_COL,
-                alpha,
-                beta,
-            )
-        }
-        WhirNativeReadBusSectionKind::Alu => {
-            let rows = expected_alu_rows_from_circuit(circuit);
-            let port = skeleton.port as usize;
-            let column = alu_read_column_for_port(port)?;
-            let witness_ids = rows
-                .iter()
-                .map(|row| alu_active_read_witness_id(row, port).unwrap_or(MISSING_WITNESS_ID))
-                .collect::<Vec<_>>();
-            read_bus_cumulative_for_rows::<F, EF>(table, &witness_ids, column, alpha, beta)
-        }
-        WhirNativeReadBusSectionKind::Recompose => {
-            let rows = expected_recompose_rows_from_circuit(circuit, &table.metadata.op_type)?;
-            let d = recompose_degree(&rows)?;
-            let port = skeleton.port as usize;
-            let value_start = 3 + d;
-            let column = if port < d {
-                value_start + port
-            } else if port == d {
-                value_start + d
-            } else {
-                return Err(WhirNativeCircuitError::ConstraintViolation(format!(
-                    "bad recompose read port {port}"
-                )));
-            };
-            let witness_ids = rows
-                .iter()
-                .map(|row| {
-                    if port < d {
-                        row.input_wids[port]
-                    } else {
-                        row.output_wid
-                    }
-                })
-                .collect::<Vec<_>>();
-            read_bus_cumulative_for_rows::<F, EF>(table, &witness_ids, column, alpha, beta)
-        }
-        WhirNativeReadBusSectionKind::Poseidon2 => {
-            let rows = expected_poseidon2_rows_from_circuit(circuit, &table.metadata.op_type)?;
-            let direction_bit_witness_ids =
-                expected_poseidon2_direction_bit_witness_ids_from_circuit(
-                    circuit,
-                    &table.metadata.op_type,
-                )?;
-            let port = skeleton.port as usize;
-            let column = P2_BB_D4_WIDTH16_READ_OFFSET + port;
-            let witness_ids = rows
-                .iter()
-                .enumerate()
-                .map(|(row_index, row)| {
-                    poseidon2_active_read_witness_id(
-                        row,
-                        &direction_bit_witness_ids,
-                        row_index,
-                        port,
-                    )
-                    .unwrap_or(MISSING_WITNESS_ID)
-                })
-                .collect::<Vec<_>>();
-            read_bus_cumulative_for_rows::<F, EF>(table, &witness_ids, column, alpha, beta)
-        }
-    }
-}
-
-fn read_bus_cumulative_for_rows<F, EF>(
-    table: &WhirNativeTableData<EF>,
-    witness_ids: &[u32],
-    value_column: usize,
-    alpha: EF,
-    beta: EF,
-) -> Result<EF, WhirNativeCircuitError>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    if witness_ids.len() > table.metadata.active_rows {
-        return Err(WhirNativeCircuitError::ConstraintViolation(
-            "read bus section has more witness ids than active rows".to_string(),
-        ));
-    }
-    if value_column >= table.metadata.width {
-        return Err(WhirNativeCircuitError::ConstraintViolation(format!(
-            "read bus value column {value_column} out of width {}",
-            table.metadata.width
-        )));
-    }
-    let mut cumulative = EF::ZERO;
-    for (row, &wid) in witness_ids.iter().enumerate() {
-        if wid == MISSING_WITNESS_ID {
-            continue;
-        }
-        let value = table.values[row * table.metadata.padded_width + value_column];
-        cumulative += read_bus_contribution::<F, EF>(alpha, beta, wid, value, 1)?;
-    }
-    Ok(cumulative)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -11643,6 +12658,39 @@ mod tests {
             no_poseidon,
         )
         .expect_err("tampered read-bus cumulative must fail");
+    }
+
+    #[test]
+    fn zeroed_read_bus_cumulatives_fail() {
+        let (circuit, public_inputs, mmcs, mut proof) = simple_arithmetic_proof();
+        assert!(
+            proof
+                .read_bus_proof
+                .sections
+                .iter()
+                .any(|section| section.cumulative != EF::ZERO),
+            "test proof should exercise a non-zero read-bus cumulative"
+        );
+        proof.read_bus_proof.sender_cumulative = EF::ZERO;
+        proof.read_bus_proof.receiver_cumulative = EF::ZERO;
+        proof.read_bus_proof.final_difference = EF::ZERO;
+        for section in &mut proof.read_bus_proof.sections {
+            section.cumulative = EF::ZERO;
+        }
+
+        verify_whir_native_circuit_proof(
+            &circuit,
+            &public_inputs,
+            WhirNativeCircuitOptions {
+                openings_per_table: 1,
+                min_num_variables: 4,
+            },
+            &proof,
+            |num_variables| make_pcs(&mmcs, num_variables),
+            TestChallenger::new,
+            no_poseidon,
+        )
+        .expect_err("zeroed read-bus cumulatives must fail");
     }
 
     #[test]

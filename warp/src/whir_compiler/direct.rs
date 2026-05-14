@@ -431,7 +431,7 @@ where
                         } else {
                             cache.codeword_mle_value(point)
                         }
-                    } else if point.len() == code.log_msg_len() {
+                    } else if code.is_systematic() && point.len() == code.log_msg_len() {
                         eval_eq_point(message_point, point)
                     } else {
                         cache.codeword_mle_value(point)
@@ -907,6 +907,35 @@ mod tests {
             scale *= gamma;
         }
 
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn coefficient_rate_one_mle_weight_uses_encoded_equality() {
+        let code = ReedSolomonCode::new_coefficient(3, 0, Dft::default());
+        assert!(!code.is_systematic());
+        assert_eq!(code.log_msg_len(), code.log_codeword_len());
+
+        let mut statement = NativeWarpCompactRootStatement::initialize(code.log_msg_len());
+        let codeword_point = vec![EF::from_u64(3), EF::from_u64(5), EF::from_u64(7)];
+        statement.add_mle(codeword_point.clone(), EF::from_u64(11));
+
+        let sumcheck_point = vec![EF::from_u64(13), EF::from_u64(17), EF::from_u64(19)];
+        let gamma = EF::from_u64(23);
+        let mut cache = EncodedMessageEqCache::new(&code, &sumcheck_point);
+        let actual = statement.batched_weight_eval_at_sumcheck_point::<F, Dft>(
+            &code,
+            &sumcheck_point,
+            gamma,
+            &mut cache,
+        );
+
+        let message_eq = Poly::<EF>::new_from_point(&sumcheck_point, EF::ONE);
+        let encoded_eq = code.encode_algebra(message_eq.as_slice());
+        let expected = Poly::new(encoded_eq).eval_ext::<F>(&Point::new(codeword_point.clone()));
+        let unsound_shortcut = eval_eq_point(&sumcheck_point, &codeword_point);
+
+        assert_ne!(unsound_shortcut, expected);
         assert_eq!(actual, expected);
     }
 }

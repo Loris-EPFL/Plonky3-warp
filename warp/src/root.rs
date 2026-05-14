@@ -479,6 +479,29 @@ where
     }
 }
 
+impl<F, EF, AccComm, FreshComm, FreshProof, AccProof, FinalProof>
+    WarpExternalRootProofBatched<F, EF, AccComm, FreshComm, FreshProof, AccProof, FinalProof>
+where
+    AccumulatorInstance<EF, AccComm>: Clone,
+    FreshComm: Clone,
+{
+    /// Extract the verifier-visible external root claim from this batched proof.
+    pub fn claim(&self) -> WarpExternalRootClaim<EF, AccComm, FreshComm> {
+        WarpExternalRootClaim {
+            step_fresh_commitments: self
+                .steps
+                .iter()
+                .map(|step| step.fresh_commitments.clone())
+                .collect(),
+            step_instances: self
+                .steps
+                .iter()
+                .map(|step| step.instance.clone())
+                .collect(),
+        }
+    }
+}
+
 /// Convenience alias for a root proof whose finalizer is witness-carrying.
 pub type WitnessRootProof<F, EF, Comm, Proof> =
     WarpRootProof<F, EF, Comm, Proof, crate::WitnessProof<EF>>;
@@ -1106,6 +1129,65 @@ where
         let final_instance = previous.expect("non-empty proof.steps checked above");
         finalizer.verify(&final_instance, &proof.final_proof)?;
         Ok(final_instance)
+    }
+
+    /// Verify a batched-opening externally committed root proof and return the
+    /// public claim receipt that an outer proof should expose.
+    pub fn verify_external_linear_chain_accumulator_batched_with_receipt<
+        Challenger,
+        FreshVerifier,
+        AccBackend,
+        Fin,
+    >(
+        &self,
+        base_challenger: &Challenger,
+        fresh_verifier: &FreshVerifier,
+        acc_backend: &AccBackend,
+        proof: &WarpExternalRootProofBatched<
+            F,
+            EF,
+            AccBackend::Commitment,
+            FreshVerifier::Commitment,
+            FreshVerifier::BatchProof,
+            AccBackend::BatchProof,
+            Fin::Proof,
+        >,
+        finalizer: &Fin,
+    ) -> Result<
+        WarpExternalRootReceipt<
+            EF,
+            AccBackend::Commitment,
+            FreshVerifier::Commitment,
+            <Challenger as CanFinalizeDigest>::Digest,
+        >,
+        WarpError,
+    >
+    where
+        Challenger:
+            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanFinalizeDigest + Clone,
+        FreshVerifier: ExternalCodewordBatchOpeningVerifier<F, Challenger>,
+        FreshVerifier::Commitment: Clone,
+        AccBackend: AccumulatorBatchOpeningBackend<F, EF, Challenger>,
+        Fin: AccumulatorFinalizer<F, EF, AccBackend::Commitment, AccBackend::ProverData>,
+    {
+        let final_instance = self.verify_external_linear_chain_accumulator_batched(
+            base_challenger,
+            fresh_verifier,
+            acc_backend,
+            proof,
+            finalizer,
+        )?;
+        let claim = proof.claim();
+        let claim_digest = claim.digest_accumulator::<F, Challenger, FreshVerifier, AccBackend>(
+            base_challenger.clone(),
+            fresh_verifier,
+            acc_backend,
+        );
+        Ok(WarpExternalRootReceipt {
+            claim,
+            claim_digest,
+            final_instance,
+        })
     }
 
     /// Verify an externally committed root proof with an external

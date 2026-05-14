@@ -318,7 +318,10 @@ fn test_zk_aggregation() -> Result<(), VerificationError> {
         .expect("failed to prove aggregation circuit");
 
     prover
-        .verify_all_tables(&aggregated_proof)
+        .verify_all_tables(
+            &aggregated_proof,
+            &aggregated_proof.self_describing_verifier_data(),
+        )
         .expect("failed to verify aggregated proof");
 
     Ok(())

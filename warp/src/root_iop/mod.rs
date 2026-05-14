@@ -160,6 +160,10 @@ where
 {
     type BatchProof = RootIopOpeningProof;
 
+    fn batch_opening_len(&self, proof: &Self::BatchProof) -> Option<usize> {
+        Some(proof.claim_ids.len())
+    }
+
     fn verify_batch_opening(
         &self,
         commitment: &Self::Commitment,
@@ -375,6 +379,10 @@ where
     Challenger: FieldChallenger<F>,
 {
     type BatchProof = RootIopOpeningProof;
+
+    fn batch_opening_len(&self, proof: &Self::BatchProof) -> Option<usize> {
+        Some(proof.claim_ids.len())
+    }
 
     fn open_batch(
         &self,
@@ -633,6 +641,10 @@ where
 {
     type BatchProof = RootIopOpeningProof;
 
+    fn batch_opening_len(&self, proof: &Self::BatchProof) -> Option<usize> {
+        Some(proof.claim_ids.len())
+    }
+
     fn verify_batch_opening(
         &self,
         commitment: &Self::Commitment,
@@ -861,6 +873,10 @@ where
     Challenger: FieldChallenger<F> + CanObserve<Comm>,
 {
     type BatchProof = RootIopOpeningProof;
+
+    fn batch_opening_len(&self, proof: &Self::BatchProof) -> Option<usize> {
+        Some(proof.claim_ids.len())
+    }
 
     fn open_batch(
         &self,
