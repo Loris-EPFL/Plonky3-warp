@@ -462,7 +462,7 @@ where
     F: TwoAdicField + Ord,
     EF: ExtensionField<F> + TwoAdicField,
     MT: Mmcs<F>,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanSampleUniformBits<F>,
 {
     /// Create a new WHIR PCS for multilinear polynomials in `num_variables` variables.
     ///

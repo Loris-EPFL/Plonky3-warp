@@ -34,7 +34,7 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use p3_challenger::{CanObserve, FieldChallenger, GrindingChallenger};
+use p3_challenger::{CanObserve, CanSampleUniformBits, FieldChallenger, GrindingChallenger};
 use p3_commit::Mmcs;
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
@@ -343,6 +343,7 @@ where
     WhirExtensionDeferredProverData<F, EF, MT, DIGEST_ELEMS>: Clone,
     Challenger: FieldChallenger<F>
         + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
         + CanObserve<F>
         + CanObserve<MT::Commitment>
         + Clone,

@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use p3_air::{Air, AirBuilder, BaseAir, RowWindow};
 use p3_baby_bear::BabyBear;
-use p3_challenger::{CanObserve, FieldChallenger, GrindingChallenger};
+use p3_challenger::{CanObserve, CanSampleUniformBits, FieldChallenger, GrindingChallenger};
 use p3_circuit::ops::{
     NpoPrivateData, Op, Poseidon2CircuitRow, Poseidon2Config, Poseidon2Trace, RecomposeTrace,
     RecomposeTraceKind,
@@ -1081,6 +1081,7 @@ where
     MT::Proof: Clone + Serialize + for<'de> Deserialize<'de>,
     Challenger: FieldChallenger<F>
         + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
         + CanObserve<F>
         + CanObserve<MT::Commitment>
         + Clone,
@@ -1651,6 +1652,7 @@ where
     MT::Proof: Clone + Serialize + for<'de> Deserialize<'de>,
     Challenger: FieldChallenger<F>
         + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
         + CanObserve<F>
         + CanObserve<MT::Commitment>
         + Clone,
@@ -1723,6 +1725,7 @@ where
     MT::Proof: Clone + Serialize + for<'de> Deserialize<'de>,
     Challenger: FieldChallenger<F>
         + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
         + CanObserve<F>
         + CanObserve<MT::Commitment>
         + Clone,
@@ -1976,7 +1979,7 @@ where
     EF: ExtensionField<F> + TwoAdicField,
     MT: Mmcs<F>,
     Dft: TwoAdicSubgroupDft<F> + Clone,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanSampleUniformBits<F>,
 {
     move |num_variables| {
         WhirPcs::new(
@@ -3756,7 +3759,7 @@ fn prove_row_folded_sumcheck_by_suffix<F, EF, Challenger, State, Eval, Fold>(
 where
     F: Field,
     EF: ExtensionField<F>,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanSampleUniformBits<F>,
     Eval: FnMut(&State, usize, usize, usize) -> Result<Vec<EF>, WhirNativeCircuitError>,
     Fold: FnMut(&mut State, EF),
 {
@@ -3815,7 +3818,7 @@ fn prove_row_folded_sumcheck_by_suffix_parallel<F, EF, Challenger, State, Eval, 
 where
     F: Field,
     EF: ExtensionField<F> + Send + Sync,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanSampleUniformBits<F>,
     State: Sync,
     Eval: Fn(&State, usize, usize, usize) -> Result<Vec<EF>, WhirNativeCircuitError> + Sync,
     Fold: FnMut(&mut State, EF),
@@ -3878,7 +3881,7 @@ fn prove_row_folded_sumcheck_by_suffix_into_parallel<F, EF, Challenger, State, E
 where
     F: Field,
     EF: ExtensionField<F> + Send + Sync,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanSampleUniformBits<F>,
     State: Sync,
     Eval: Fn(&State, usize, usize, usize, &mut [EF]) -> Result<(), WhirNativeCircuitError> + Sync,
     Fold: FnMut(&mut State, EF),
@@ -4444,6 +4447,7 @@ where
     MT::Commitment: Clone,
     Challenger: FieldChallenger<F>
         + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
         + CanObserve<F>
         + CanObserve<MT::Commitment>,
     MakeChallenger: Fn() -> Challenger,
@@ -4562,6 +4566,7 @@ where
     MT::Commitment: Clone,
     Challenger: FieldChallenger<F>
         + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
         + CanObserve<F>
         + CanObserve<MT::Commitment>,
     MakeChallenger: Fn() -> Challenger,
@@ -4881,7 +4886,10 @@ fn prove_witness_local_constraints<F, EF, Challenger>(
 where
     F: Field,
     EF: ExtensionField<F> + Send + Sync,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<F>,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<F>,
 {
     validate_witness_metadata(&table.metadata)?;
     observe_local_constraint_context::<F, EF, Challenger>(
@@ -4956,7 +4964,10 @@ fn verify_witness_local_constraints<F, EF, Challenger>(
 where
     F: Field,
     EF: ExtensionField<F> + Send + Sync,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<F>,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<F>,
 {
     validate_witness_metadata(metadata)?;
     verify_local_constraint_header(
@@ -5216,7 +5227,10 @@ fn prove_known_rows_local_constraints<F, EF, Challenger>(
 where
     F: Field,
     EF: ExtensionField<F> + Send + Sync,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<F>,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<F>,
 {
     validate_known_rows_local_inputs(table, expected_rows, expected_witness_ids)?;
     validate_witness_metadata(&witness_table.metadata)?;
@@ -5314,7 +5328,10 @@ fn verify_known_rows_local_constraints<F, EF, Challenger>(
 where
     F: Field,
     EF: ExtensionField<F>,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<F>,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<F>,
 {
     validate_known_rows_metadata(metadata, expected_rows, expected_witness_ids)?;
     validate_witness_metadata(witness_metadata)?;
@@ -5633,7 +5650,10 @@ fn prove_alu_local_constraints<F, EF, Challenger>(
 where
     F: Field,
     EF: ExtensionField<F> + Send + Sync,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<F>,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<F>,
 {
     validate_alu_local_inputs(table, expected_rows)?;
     validate_witness_metadata(&witness_table.metadata)?;
@@ -5721,7 +5741,10 @@ fn verify_alu_local_constraints<F, EF, Challenger>(
 where
     F: Field,
     EF: ExtensionField<F>,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<F>,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<F>,
 {
     validate_alu_metadata(metadata, expected_rows)?;
     validate_witness_metadata(witness_metadata)?;
@@ -6004,7 +6027,10 @@ fn prove_recompose_local_constraints<F, EF, Challenger>(
 where
     F: Field,
     EF: ExtensionField<F> + Send + Sync,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<F>,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<F>,
 {
     validate_recompose_local_inputs(table, expected_rows)?;
     validate_witness_metadata(&witness_table.metadata)?;
@@ -6099,7 +6125,10 @@ fn verify_recompose_local_constraints<F, EF, Challenger>(
 where
     F: Field,
     EF: ExtensionField<F>,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<F>,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<F>,
 {
     validate_recompose_metadata(metadata, expected_rows)?;
     validate_witness_metadata(witness_metadata)?;
@@ -6191,7 +6220,10 @@ fn prove_poseidon2_air_constraints<F, EF, Challenger>(
 where
     F: Field,
     EF: ExtensionField<F> + ExtensionField<BabyBear> + Send + Sync,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<F>,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<F>,
 {
     validate_poseidon2_air_metadata::<F, EF>(&table.metadata, expected_rows)?;
     validate_poseidon2_direction_bit_witness_ids(expected_rows, direction_bit_witness_ids)?;
@@ -6314,7 +6346,10 @@ fn verify_poseidon2_air_constraints<F, EF, Challenger>(
 where
     F: Field,
     EF: ExtensionField<F> + ExtensionField<BabyBear> + Send + Sync,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<F>,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<F>,
 {
     validate_poseidon2_air_metadata::<F, EF>(metadata, expected_rows)?;
     validate_poseidon2_direction_bit_witness_ids(expected_rows, direction_bit_witness_ids)?;
@@ -7418,6 +7453,7 @@ where
     MT::Proof: Clone + Serialize + for<'de> Deserialize<'de>,
     Challenger: FieldChallenger<F>
         + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
         + CanObserve<F>
         + CanObserve<MT::Commitment>
         + Clone,
@@ -7646,6 +7682,7 @@ where
     MT::Proof: Clone + Serialize + for<'de> Deserialize<'de>,
     Challenger: FieldChallenger<F>
         + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
         + CanObserve<F>
         + CanObserve<MT::Commitment>
         + Clone,
@@ -7755,6 +7792,7 @@ where
     MT::Proof: Clone + Serialize + for<'de> Deserialize<'de>,
     Challenger: FieldChallenger<F>
         + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
         + CanObserve<F>
         + CanObserve<MT::Commitment>
         + Clone,
@@ -10108,8 +10146,11 @@ where
     MT: Mmcs<F>,
     MT::Commitment: Clone + PartialEq + Serialize + for<'de> Deserialize<'de>,
     MT::Proof: Clone + Serialize + for<'de> Deserialize<'de>,
-    Challenger:
-        FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment> + Clone,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<MT::Commitment>
+        + Clone,
     Dft: TwoAdicSubgroupDft<F>,
     MakeChallenger: Fn() -> Challenger,
 {
@@ -10209,7 +10250,10 @@ where
     F: TwoAdicField + Ord + Send + Sync + Clone,
     EF: ExtensionField<F> + TwoAdicField,
     MT: Mmcs<F>,
-    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<MT::Commitment>,
     Dft: TwoAdicSubgroupDft<F>,
 {
     let (opened_values, proof) =
@@ -10249,8 +10293,11 @@ where
     MT: Mmcs<F>,
     MT::Commitment: Clone + PartialEq + Serialize + for<'de> Deserialize<'de>,
     MT::Proof: Clone + Serialize + for<'de> Deserialize<'de>,
-    Challenger:
-        FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment> + Clone,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<MT::Commitment>
+        + Clone,
     Dft: TwoAdicSubgroupDft<F>,
 {
     if opening_proof.table_index != table_index
@@ -10329,8 +10376,11 @@ where
     MT: Mmcs<F>,
     MT::Commitment: Clone + PartialEq + Serialize + for<'de> Deserialize<'de>,
     MT::Proof: Clone + Serialize + for<'de> Deserialize<'de>,
-    Challenger:
-        FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment> + Clone,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<MT::Commitment>
+        + Clone,
     Dft: TwoAdicSubgroupDft<F>,
     MakeChallenger: Fn() -> Challenger,
 {
@@ -10821,7 +10871,8 @@ fn poseidon2_config_from_op_type(op_type: &str) -> Option<Poseidon2Config> {
 mod tests {
     use p3_baby_bear::{BabyBear, Poseidon2BabyBear, default_babybear_poseidon2_16};
     use p3_challenger::{
-        CanObserve, CanSample, CanSampleBits, DuplexChallenger, FieldChallenger, GrindingChallenger,
+        CanObserve, CanSample, CanSampleBits, CanSampleUniformBits, DuplexChallenger,
+        FieldChallenger, GrindingChallenger, ResamplingError,
     };
     use p3_circuit::CircuitBuilder;
     use p3_circuit::ops::{
@@ -10892,6 +10943,15 @@ mod tests {
     impl CanSampleBits<usize> for TestChallenger {
         fn sample_bits(&mut self, bits: usize) -> usize {
             self.0.sample_bits(bits)
+        }
+    }
+
+    impl CanSampleUniformBits<F> for TestChallenger {
+        fn sample_uniform_bits<const RESAMPLE: bool>(
+            &mut self,
+            bits: usize,
+        ) -> Result<usize, ResamplingError> {
+            self.0.sample_uniform_bits::<RESAMPLE>(bits)
         }
     }
 

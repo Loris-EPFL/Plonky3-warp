@@ -53,7 +53,7 @@ impl<EF: Field> NativeWarpWhirOracleStatement<EF> {
     where
         F: TwoAdicField,
         EF: ExtensionField<F> + TwoAdicField,
-        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanSampleUniformBits<F>,
     {
         self.constraints
             .prove_reduction_base(oracle, challenger, pow_bits)
@@ -76,7 +76,7 @@ impl<EF: Field> NativeWarpWhirOracleStatement<EF> {
     where
         F: TwoAdicField,
         EF: ExtensionField<F> + TwoAdicField,
-        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanSampleUniformBits<F>,
     {
         self.constraints
             .prove_reduction_ext::<F, _>(oracle, challenger, pow_bits)
@@ -93,7 +93,7 @@ impl<EF: Field> NativeWarpWhirOracleStatement<EF> {
     where
         F: TwoAdicField,
         EF: ExtensionField<F> + TwoAdicField,
-        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
+        Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F> + CanSampleUniformBits<F>,
     {
         self.constraints
             .verify_reduction(proof, challenger, pow_bits)
@@ -116,8 +116,10 @@ impl<EF: Field> NativeWarpWhirOracleStatement<EF> {
         F: TwoAdicField + Ord,
         EF: ExtensionField<F> + TwoAdicField,
         MT: Mmcs<F>,
-        Challenger:
-            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
+        Challenger: FieldChallenger<F>
+            + GrindingChallenger<Witness = F>
+            + CanSampleUniformBits<F>
+            + CanObserve<MT::Commitment>,
         Dft: TwoAdicSubgroupDft<F>,
     {
         pcs.open_linear_sigma_deferred(
@@ -142,8 +144,10 @@ impl<EF: Field> NativeWarpWhirOracleStatement<EF> {
         EF: ExtensionField<F> + TwoAdicField,
         MT: Mmcs<F>,
         MT::Commitment: PartialEq,
-        Challenger:
-            FieldChallenger<F> + GrindingChallenger<Witness = F> + CanObserve<MT::Commitment>,
+        Challenger: FieldChallenger<F>
+            + GrindingChallenger<Witness = F>
+            + CanSampleUniformBits<F>
+            + CanObserve<MT::Commitment>,
         Dft: TwoAdicSubgroupDft<F>,
     {
         pcs.verify_linear_sigma_deferred(
