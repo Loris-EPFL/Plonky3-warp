@@ -8,6 +8,7 @@ use p3_batch_stark::ProverData;
 use p3_circuit::CircuitBuilder;
 use p3_circuit::ops::{generate_poseidon2_trace, generate_recompose_trace};
 use p3_circuit::test_utils::{FibonacciAir, generate_trace_rows};
+use p3_circuit_prover::batch_stark_prover::PrimitiveTable;
 use p3_circuit_prover::common::get_airs_and_degrees_with_prep;
 use p3_circuit_prover::{
     BatchStarkProver, CircuitProverData, ConstraintProfile, Poseidon2Prover, TablePacking,
@@ -103,8 +104,14 @@ fn test_aggregation_with_different_shapes() -> Result<(), VerificationError> {
     let batch_stark_proof = prover
         .prove_all_tables(&traces, &circuit_prover_data)
         .unwrap();
-    let common = circuit_prover_data.common_data();
-    prover.verify_all_tables(&batch_stark_proof).unwrap();
+    let verifier_data = batch_stark_proof.self_describing_verifier_data();
+    let common = &verifier_data.stark_common;
+    prover
+        .verify_all_tables(
+            &batch_stark_proof,
+            &batch_stark_proof.self_describing_verifier_data(),
+        )
+        .unwrap();
 
     // Build the verification circuit.
     let mut circuit_builder = CircuitBuilder::new();
@@ -148,7 +155,8 @@ fn test_aggregation_with_different_shapes() -> Result<(), VerificationError> {
     // Build the verifier inputs for the Batch-Stark.
     let lookup_gadget = LogUpGadget::new();
     let batch_proof = &batch_stark_proof.proof;
-    let right_pis: Vec<Vec<F>> = vec![vec![]; 5];
+    let mut right_pis: Vec<Vec<F>> = vec![vec![]; 5];
+    right_pis[PrimitiveTable::Public as usize] = batch_stark_proof.public_values.clone();
 
     let batch_poseidon_provers: Vec<Box<dyn TableProver<MyConfig>>> =
         vec![Box::new(Poseidon2Prover::new(

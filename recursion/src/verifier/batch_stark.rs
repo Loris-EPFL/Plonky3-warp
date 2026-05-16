@@ -244,7 +244,12 @@ where
     SymbolicExpressionExt<Val<SC>, SC::Challenge>:
         Algebra<SymbolicExpression<Val<SC>>> + Algebra<SC::Challenge>,
 {
-    assert_eq!(proof.ext_degree, TRACE_D, "trace extension degree mismatch");
+    if proof.ext_degree != TRACE_D {
+        return Err(VerificationError::InvalidProofShape(format!(
+            "trace extension degree mismatch: expected {TRACE_D}, got {}",
+            proof.ext_degree
+        )));
+    }
     let rows: RowCounts = proof.rows;
     let packing = proof.table_packing.clone();
     let public_lanes = packing.public_lanes();
@@ -293,6 +298,7 @@ where
     }
 
     let mut air_public_counts = vec![0usize; NUM_PRIMITIVE_TABLES];
+    air_public_counts[PrimitiveTable::Public as usize] = proof.public_values.len();
     for entry in &proof.non_primitives {
         air_public_counts.push(entry.public_values.len());
     }

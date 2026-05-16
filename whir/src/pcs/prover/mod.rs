@@ -20,7 +20,7 @@ use crate::constraints::statement::{EqStatement, SelectStatement};
 use crate::fiat_shamir::errors::FiatShamirError;
 use crate::parameters::WhirConfig;
 use crate::pcs::proof::{QueryOpening, SumcheckData, WhirProof};
-use crate::pcs::utils::get_challenge_stir_queries;
+use crate::pcs::utils::get_challenge_stir_queries_with_samples;
 use crate::sumcheck::extrapolate_01inf;
 use crate::sumcheck::product_polynomial::ProductPolynomial;
 use crate::sumcheck::strategy::{SumcheckProver, VariableOrder};
@@ -511,12 +511,14 @@ where
         challenger.sample();
 
         // STIR query sampling.
-        let stir_challenges_indexes = get_challenge_stir_queries::<Challenger, F, EF>(
-            round_params.domain_size,
-            self.folding_factor.at_round(round_index),
-            round_params.num_queries,
-            challenger,
-        )?;
+        let (stir_challenges_indexes, stir_challenge_sample_indexes) =
+            get_challenge_stir_queries_with_samples::<Challenger, F, EF>(
+                round_params.domain_size,
+                self.folding_factor.at_round(round_index),
+                round_params.num_queries,
+                challenger,
+            )?;
+        proof.rounds[round_index].query_sample_indices = stir_challenge_sample_indexes;
 
         let mut stir_statement = SelectStatement::initialize(num_variables);
         let mut queries = Vec::with_capacity(stir_challenges_indexes.len());
@@ -703,13 +705,15 @@ where
         }
 
         // Final STIR queries.
-        let final_challenge_indexes = get_challenge_stir_queries::<Challenger, F, EF>(
-            self.final_round_config().domain_size,
-            self.folding_factor.at_round(round_index),
-            self.final_queries,
-            challenger,
-        )?;
+        let (final_challenge_indexes, final_challenge_sample_indexes) =
+            get_challenge_stir_queries_with_samples::<Challenger, F, EF>(
+                self.final_round_config().domain_size,
+                self.folding_factor.at_round(round_index),
+                self.final_queries,
+                challenger,
+            )?;
         proof.final_query_indices = final_challenge_indexes.clone();
+        proof.final_query_sample_indices = final_challenge_sample_indexes;
 
         // Open Merkle proofs at the queried positions.
         match &round_state.merkle_prover_data {

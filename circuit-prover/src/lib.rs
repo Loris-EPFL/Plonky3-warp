@@ -31,7 +31,8 @@
 //! let cfg = build_standard_config_babybear();
 //! let prover = BatchStarkProver::new(cfg);
 //! let proof = prover.prove_all_tables(&traces).unwrap();
-//! prover.verify_all_tables(&proof).unwrap();
+//! let verifier_data = proof.self_describing_verifier_data(); // use trusted verifier data in production
+//! prover.verify_all_tables(&proof, &verifier_data).unwrap();
 //! ```
 #![cfg_attr(not(feature = "std"), no_std)]
 

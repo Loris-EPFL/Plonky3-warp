@@ -71,6 +71,7 @@ pub use root_iop::{
 };
 pub use whir_compiler::{
     NativeWarpWhirClaimCompileError, NativeWarpWhirCompiler, NativeWarpWhirEvalClaim,
+    NativeWarpWhirLinearOpeningProof, NativeWarpWhirLinearOpeningProofSystem,
     NativeWarpWhirOracleStatement, NativeWarpWhirRootBaseProverData, NativeWarpWhirRootCommitment,
     NativeWarpWhirRootOracleProverData, NativeWarpWhirRootProof, NativeWarpWhirRootProofError,
     NativeWarpWhirRootProofSystem, NativeWarpWhirRootProverData, NativeWarpWhirRootReductionError,

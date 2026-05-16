@@ -71,7 +71,23 @@ fn test_babybear_batch_stark_base_field() {
     assert_eq!(proof.ext_degree, 1);
     assert!(proof.w_binomial.is_none());
 
-    assert!(prover.verify_all_tables(&proof).is_ok());
+    let verifier_data = proof.self_describing_verifier_data();
+    assert!(prover.verify_all_tables(&proof, &verifier_data).is_ok());
+
+    let mut intended_statement = verifier_data.clone();
+    intended_statement.public_values[1] = BabyBear::from_u64(107);
+    assert!(matches!(
+        prover.verify_all_tables(&proof, &intended_statement),
+        Err(BatchStarkProverError::MetadataMismatch(_))
+    ));
+
+    let mut attacker_proof = proof;
+    attacker_proof.public_values = intended_statement.public_values.clone();
+    assert!(
+        prover
+            .verify_all_tables(&attacker_proof, &intended_statement)
+            .is_err()
+    );
 }
 
 #[test]
@@ -126,7 +142,11 @@ fn test_table_lookups() {
     assert_eq!(proof.ext_degree, 1);
     assert!(proof.w_binomial.is_none());
 
-    assert!(prover.verify_all_tables(&proof).is_ok());
+    assert!(
+        prover
+            .verify_all_tables(&proof, &proof.self_describing_verifier_data())
+            .is_ok()
+    );
 
     // Check that the generated lookups are correct and consistent across tables.
     for air in airs.iter_mut() {
@@ -227,7 +247,9 @@ fn test_extension_field_batch_stark() {
     // Ensure W was captured
     let expected_w = <Ext4 as ExtractBinomialW<BabyBear>>::extract_w().unwrap();
     assert_eq!(proof.w_binomial, Some(expected_w));
-    prover.verify_all_tables(&proof).unwrap();
+    prover
+        .verify_all_tables(&proof, &proof.self_describing_verifier_data())
+        .unwrap();
 }
 
 #[test]
@@ -302,7 +324,11 @@ fn test_extension_field_table_lookups() {
     let expected_w = <Ext4 as ExtractBinomialW<BabyBear>>::extract_w().unwrap();
     assert_eq!(proof.w_binomial, Some(expected_w));
 
-    assert!(prover.verify_all_tables(&proof).is_ok());
+    assert!(
+        prover
+            .verify_all_tables(&proof, &proof.self_describing_verifier_data())
+            .is_ok()
+    );
 
     // Check that the generated lookups are correct and consistent across tables.
     for air in airs.iter_mut() {
@@ -386,7 +412,9 @@ fn test_koalabear_batch_stark_base_field() {
         .unwrap();
     assert_eq!(proof.ext_degree, 1);
     assert!(proof.w_binomial.is_none());
-    prover.verify_all_tables(&proof).unwrap();
+    prover
+        .verify_all_tables(&proof, &proof.self_describing_verifier_data())
+        .unwrap();
 }
 
 #[test]
@@ -483,7 +511,9 @@ fn test_koalabear_batch_stark_extension_field_d8() {
     assert_eq!(proof.ext_degree, 8);
     let expected_w = <KBExtField as ExtractBinomialW<KoalaBear>>::extract_w().unwrap();
     assert_eq!(proof.w_binomial, Some(expected_w));
-    prover.verify_all_tables(&proof).unwrap();
+    prover
+        .verify_all_tables(&proof, &proof.self_describing_verifier_data())
+        .unwrap();
 }
 
 #[test]
@@ -546,7 +576,9 @@ fn test_goldilocks_batch_stark_binomial_ext2() {
     assert_eq!(proof.ext_degree, 2);
     let expected_w = <Ext2 as ExtractBinomialW<Goldilocks>>::extract_w().unwrap();
     assert_eq!(proof.w_binomial, Some(expected_w));
-    prover.verify_all_tables(&proof).unwrap();
+    prover
+        .verify_all_tables(&proof, &proof.self_describing_verifier_data())
+        .unwrap();
 }
 
 #[test]
@@ -681,7 +713,9 @@ fn test_mul_only_circuit_padding() {
     let proof = prover
         .prove_all_tables(&traces, &circuit_prover_data)
         .unwrap();
-    prover.verify_all_tables(&proof).unwrap();
+    prover
+        .verify_all_tables(&proof, &proof.self_describing_verifier_data())
+        .unwrap();
 }
 
 #[test]
@@ -729,7 +763,9 @@ fn test_add_only_circuit_padding() {
     let proof = prover
         .prove_all_tables(&traces, &circuit_prover_data)
         .unwrap();
-    prover.verify_all_tables(&proof).unwrap();
+    prover
+        .verify_all_tables(&proof, &proof.self_describing_verifier_data())
+        .unwrap();
 }
 
 fn koala_ef5_lift(b: KoalaBear) -> QuinticTrinomialExtensionField<KoalaBear> {
@@ -825,7 +861,9 @@ fn test_koalabear_quintic_trinomial_batch_stark_with_poseidon_d1() {
     assert_eq!(proof.ext_degree, D);
     assert!(proof.w_binomial.is_none());
     assert!(proof.alu_quintic_trinomial);
-    prover.verify_all_tables(&proof).unwrap();
+    prover
+        .verify_all_tables(&proof, &proof.self_describing_verifier_data())
+        .unwrap();
 }
 
 /// Two D=1 Poseidon rows in an EF5 circuit: the second row uses `new_start=false` so the full
@@ -921,7 +959,9 @@ fn test_koalabear_quintic_trinomial_batch_stark_poseidon_d1_sponge_chain() {
     assert_eq!(proof.ext_degree, D);
     assert!(proof.w_binomial.is_none());
     assert!(proof.alu_quintic_trinomial);
-    prover.verify_all_tables(&proof).unwrap();
+    prover
+        .verify_all_tables(&proof, &proof.self_describing_verifier_data())
+        .unwrap();
 }
 
 #[test]
@@ -993,6 +1033,6 @@ fn test_stark_serialization_round_trip() {
     // Verification must succeed against the deserialized proof, relying only on the
     // proof's own `stark_common` for the preprocessed binding.
     prover
-        .verify_all_tables(&deserialized)
-        .expect("verification uses proof.stark_common");
+        .verify_all_tables(&deserialized, &deserialized.self_describing_verifier_data())
+        .expect("verification uses explicit verifier data");
 }

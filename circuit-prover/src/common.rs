@@ -335,19 +335,27 @@ where
             }
             PrimitiveOpType::Public => {
                 // Public preprocessed per op from circuit.rs: 1 value (D-scaled out_idx).
-                // Convert to [ext_mult, out_idx] pairs using ext_reads.
-                let mut prep_2col: Vec<Val<SC>> = Vec::with_capacity(base_prep[idx].len() * 2);
+                // Convert to [active, ext_mult, out_idx, value[0..D]] rows. `active`
+                // distinguishes real public inputs from zero padding even when the public value
+                // has no downstream reads. The value columns are filled with zeros here because
+                // circuit preprocessing is statement-independent; prove_all_tables overwrites
+                // them with the concrete verifier-pinned public values and recomputes CommonData.
+                let public_prep_width = 3 + D;
+                let mut prep_public: Vec<Val<SC>> =
+                    Vec::with_capacity(base_prep[idx].len() * public_prep_width);
                 for &out_idx in &base_prep[idx] {
                     let out_wid =
                         (<Val<SC> as PrimeField64>::as_canonical_u64(&out_idx) as usize) / D;
                     let n_reads = preprocessed.ext_reads.get(out_wid).copied().unwrap_or(0);
-                    prep_2col.push(<Val<SC>>::from_u32(n_reads));
-                    prep_2col.push(out_idx);
+                    prep_public.push(<Val<SC>>::ONE);
+                    prep_public.push(<Val<SC>>::from_u32(n_reads));
+                    prep_public.push(out_idx);
+                    prep_public.extend(core::iter::repeat_n(<Val<SC>>::ZERO, D));
                 }
 
-                let num_ops = prep_2col.len() / 2;
-                // Store the converted 2-col format before building the AIR.
-                base_prep[idx] = prep_2col;
+                let num_ops = prep_public.len() / public_prep_width;
+                // Store the converted format before building the AIR.
+                base_prep[idx] = prep_public;
                 let public_air = PublicAir::new_with_preprocessed(
                     num_ops,
                     effective_public_lanes,

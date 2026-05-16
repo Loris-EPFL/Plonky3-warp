@@ -3,7 +3,7 @@
 
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use alloc::{format, vec};
 
@@ -80,7 +80,7 @@ const fn default_npo_lanes() -> usize {
     1
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct NonPrimitiveTableEntry<SC>
 where
@@ -367,6 +367,38 @@ fn clone_common_data<SC: StarkGenericConfig>(common: &CommonData<SC>) -> CommonD
     )
 }
 
+fn flatten_public_values<F, EF>(values: &[EF]) -> Vec<F>
+where
+    F: Field,
+    EF: BasedVectorSpace<F>,
+{
+    values
+        .iter()
+        .flat_map(|value| value.as_basis_coefficients_slice().iter().copied())
+        .collect()
+}
+
+fn bind_public_values_in_preprocessed<F: Field, const D: usize>(
+    public_prep: &mut [F],
+    public_values: &[F],
+) {
+    let row_width = 3 + D;
+    assert_eq!(
+        public_prep.len() % row_width,
+        0,
+        "malformed public preprocessed columns"
+    );
+    assert_eq!(
+        public_values.len(),
+        (public_prep.len() / row_width) * D,
+        "public value count does not match public preprocessed columns"
+    );
+    for (op_idx, value) in public_values.chunks_exact(D).enumerate() {
+        let start = op_idx * row_width + 3;
+        public_prep[start..start + D].copy_from_slice(value);
+    }
+}
+
 /// Custom (de)serialization for [`BatchStarkProof::stark_common`]. Persists only the
 /// preprocessed binding (commitment + per-instance metadata): the part the verifier
 /// needs to bind the proof to the [`CommonData`] it was generated against. `lookups`
@@ -414,6 +446,11 @@ where
     pub rows: RowCounts,
     /// Variant used for the primitive ALU table.
     pub alu_variant: AirVariant,
+    /// Flattened base-field public values for the primitive public-input table.
+    ///
+    /// These values are serialized for transport, but verifiers must compare
+    /// them against trusted statement data before accepting the proof.
+    pub public_values: Vec<Val<SC>>,
     /// The degree of the field extension (`D`) used for the proof.
     pub ext_degree: usize,
     /// The binomial coefficient `W` for extension field multiplication, if `ext_degree > 1`.
@@ -426,6 +463,77 @@ where
     /// Common data derived from the final table AIRs after trace construction.
     #[serde(with = "serde_stark_common")]
     pub stark_common: CommonData<SC>,
+}
+
+/// Verifier-pinned statement data for a [`BatchStarkProof`].
+///
+/// This object is the verifier key/public statement for the circuit-table batch:
+/// it fixes the table layout, row counts, public values, dynamic table manifest,
+/// extension-field mode, and batch-STARK common data. Verification must use this
+/// trusted data rather than accepting the corresponding fields from an untrusted
+/// proof blob.
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct BatchStarkVerifierData<SC>
+where
+    SC: StarkGenericConfig,
+{
+    pub table_packing: TablePacking,
+    pub rows: RowCounts,
+    pub alu_variant: AirVariant,
+    pub public_values: Vec<Val<SC>>,
+    pub ext_degree: usize,
+    pub w_binomial: Option<Val<SC>>,
+    #[serde(default)]
+    pub alu_quintic_trinomial: bool,
+    pub non_primitives: Vec<NonPrimitiveTableEntry<SC>>,
+    #[serde(with = "serde_stark_common")]
+    pub stark_common: CommonData<SC>,
+}
+
+impl<SC> Clone for BatchStarkVerifierData<SC>
+where
+    SC: StarkGenericConfig,
+    Val<SC>: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            table_packing: self.table_packing.clone(),
+            rows: self.rows,
+            alu_variant: self.alu_variant,
+            public_values: self.public_values.clone(),
+            ext_degree: self.ext_degree,
+            w_binomial: self.w_binomial.clone(),
+            alu_quintic_trinomial: self.alu_quintic_trinomial,
+            non_primitives: self.non_primitives.clone(),
+            stark_common: clone_common_data(&self.stark_common),
+        }
+    }
+}
+
+impl<SC> BatchStarkProof<SC>
+where
+    SC: StarkGenericConfig,
+    Val<SC>: Clone,
+{
+    /// Return a verifier-data bundle copied from this proof.
+    ///
+    /// This is useful for local roundtrip tests and serialization checks. A
+    /// production verifier must build or receive [`BatchStarkVerifierData`] from
+    /// a trusted statement source, not from the untrusted proof it is checking.
+    pub fn self_describing_verifier_data(&self) -> BatchStarkVerifierData<SC> {
+        BatchStarkVerifierData {
+            table_packing: self.table_packing.clone(),
+            rows: self.rows,
+            alu_variant: self.alu_variant,
+            public_values: self.public_values.clone(),
+            ext_degree: self.ext_degree,
+            w_binomial: self.w_binomial.clone(),
+            alu_quintic_trinomial: self.alu_quintic_trinomial,
+            non_primitives: self.non_primitives.clone(),
+            stark_common: clone_common_data(&self.stark_common),
+        }
+    }
 }
 
 impl<SC> core::fmt::Debug for BatchStarkProof<SC>
@@ -443,6 +551,7 @@ where
         f.debug_struct("BatchStarkProof")
             .field("table_packing", &self.table_packing)
             .field("rows", &self.rows)
+            .field("public_values_len", &self.public_values.len())
             .field("ext_degree", &self.ext_degree)
             .field("w_binomial", &self.w_binomial)
             .field("alu_quintic_trinomial", &self.alu_quintic_trinomial)
@@ -487,6 +596,10 @@ pub enum BatchStarkProverError {
     /// A non-primitive table entry references an op type for which no [`TableProver`] was registered.
     #[error("missing table prover for non-primitive op `{0:?}`")]
     MissingTableProver(NpoTypeId),
+
+    /// Proof metadata does not match verifier-pinned statement data.
+    #[error("proof metadata mismatch: {0}")]
+    MetadataMismatch(String),
 }
 
 impl<SC, const D: usize> BaseAir<Val<SC>> for CircuitTableAir<SC, D>
@@ -510,6 +623,39 @@ where
             Self::Alu(a) => a.preprocessed_trace(),
             Self::Dynamic(a) => {
                 <dyn CloneableBatchAir<SC> as BaseAir<Val<SC>>>::preprocessed_trace(a.air())
+            }
+        }
+    }
+
+    fn num_public_values(&self) -> usize {
+        match self {
+            Self::Const(a) => a.num_public_values(),
+            Self::Public(a) => a.num_public_values(),
+            Self::Alu(a) => a.num_public_values(),
+            Self::Dynamic(a) => {
+                <dyn CloneableBatchAir<SC> as BaseAir<Val<SC>>>::num_public_values(a.air())
+            }
+        }
+    }
+
+    fn num_constraints(&self) -> Option<usize> {
+        match self {
+            Self::Const(a) => a.num_constraints(),
+            Self::Public(a) => a.num_constraints(),
+            Self::Alu(a) => a.num_constraints(),
+            Self::Dynamic(a) => {
+                <dyn CloneableBatchAir<SC> as BaseAir<Val<SC>>>::num_constraints(a.air())
+            }
+        }
+    }
+
+    fn max_constraint_degree(&self) -> Option<usize> {
+        match self {
+            Self::Const(a) => a.max_constraint_degree(),
+            Self::Public(a) => a.max_constraint_degree(),
+            Self::Alu(a) => a.max_constraint_degree(),
+            Self::Dynamic(a) => {
+                <dyn CloneableBatchAir<SC> as BaseAir<Val<SC>>>::max_constraint_degree(a.air())
             }
         }
     }
@@ -705,7 +851,7 @@ where
         <() as RegisterPoseidon2ForExt<D, SC>>::register_poseidon2(self, config);
     }
 
-    /// Register the recompose (BF→EF packing) table prover(s) for extension degree `D`.
+    /// Register the recompose (BF-to-EF packing) table prover(s) for extension degree `D`.
     ///
     /// Set `split_coeff_tables` to `true` when the Poseidon2 permutation degree can differ
     /// from the circuit extension degree `D` (e.g. D=1 Poseidon2 in a D=5 circuit). That
@@ -766,21 +912,83 @@ where
         }
     }
 
-    /// Verify the unified batch STARK proof against all tables.
+    /// Verify the unified batch STARK proof against verifier-pinned statement data.
+    ///
+    /// The `expected` argument must come from the verifier's trusted circuit/public-input
+    /// statement. In particular, do not build it from an untrusted `proof` received from a
+    /// prover unless this is only a local roundtrip test.
     pub fn verify_all_tables(
         &self,
         proof: &BatchStarkProof<SC>,
+        expected: &BatchStarkVerifierData<SC>,
     ) -> Result<(), BatchStarkProverError> {
-        let common = &proof.stark_common;
-        match proof.ext_degree {
-            1 => self.verify::<1>(proof, None, common),
-            2 => self.verify::<2>(proof, proof.w_binomial, common),
-            4 => self.verify::<4>(proof, proof.w_binomial, common),
-            5 => self.verify::<5>(proof, proof.w_binomial, common),
-            6 => self.verify::<6>(proof, proof.w_binomial, common),
-            8 => self.verify::<8>(proof, proof.w_binomial, common),
+        self.ensure_expected_metadata(proof, expected)?;
+        match expected.ext_degree {
+            1 => self.verify::<1>(proof, expected, None),
+            2 => self.verify::<2>(proof, expected, expected.w_binomial.clone()),
+            4 => self.verify::<4>(proof, expected, expected.w_binomial.clone()),
+            5 => self.verify::<5>(proof, expected, expected.w_binomial.clone()),
+            6 => self.verify::<6>(proof, expected, expected.w_binomial.clone()),
+            8 => self.verify::<8>(proof, expected, expected.w_binomial.clone()),
             d => Err(BatchStarkProverError::UnsupportedDegree(d)),
         }
+    }
+
+    fn ensure_expected_metadata(
+        &self,
+        proof: &BatchStarkProof<SC>,
+        expected: &BatchStarkVerifierData<SC>,
+    ) -> Result<(), BatchStarkProverError> {
+        let mismatch =
+            |field: &str| Err(BatchStarkProverError::MetadataMismatch(field.to_string()));
+
+        if proof.table_packing != expected.table_packing {
+            return mismatch("table_packing");
+        }
+        if proof.rows != expected.rows {
+            return mismatch("rows");
+        }
+        if proof.alu_variant != expected.alu_variant {
+            return mismatch("alu_variant");
+        }
+        if proof.public_values != expected.public_values {
+            return mismatch("public_values");
+        }
+        if proof.ext_degree != expected.ext_degree {
+            return mismatch("ext_degree");
+        }
+        if proof.w_binomial != expected.w_binomial {
+            return mismatch("w_binomial");
+        }
+        if proof.alu_quintic_trinomial != expected.alu_quintic_trinomial {
+            return mismatch("alu_quintic_trinomial");
+        }
+        if proof.non_primitives.len() != expected.non_primitives.len() {
+            return mismatch("non_primitives.len");
+        }
+        for (idx, (got, want)) in proof
+            .non_primitives
+            .iter()
+            .zip(&expected.non_primitives)
+            .enumerate()
+        {
+            if got.op_type != want.op_type {
+                return mismatch(&format!("non_primitives[{idx}].op_type"));
+            }
+            if got.rows != want.rows {
+                return mismatch(&format!("non_primitives[{idx}].rows"));
+            }
+            if got.lanes != want.lanes {
+                return mismatch(&format!("non_primitives[{idx}].lanes"));
+            }
+            if got.public_values != want.public_values {
+                return mismatch(&format!("non_primitives[{idx}].public_values"));
+            }
+            if got.air_variant != want.air_variant {
+                return mismatch(&format!("non_primitives[{idx}].air_variant"));
+            }
+        }
+        Ok(())
     }
 
     /// Generate a batch STARK proof for a specific extension field degree.
@@ -799,7 +1007,7 @@ where
     {
         let primitive = &circuit_prover_data.primitive_columns;
         let non_primitive = &circuit_prover_data.non_primitive_columns;
-        let prover_data = &circuit_prover_data.prover_data;
+        let _prover_data = &circuit_prover_data.prover_data;
 
         // One lookup per NpoTypeId instead of repeated `op_type()` (clones inner id string).
         let prover_index_by_type: BTreeMap<NpoTypeId, usize> = self
@@ -832,7 +1040,7 @@ where
             packing.alu_lanes()
         };
 
-        // Const — preprocessed is already in [ext_mult, index] 2-col format.
+        // Const: preprocessed is already in [ext_mult, index] 2-col format.
         let const_rows = traces.const_trace.values.len();
         let const_prep = primitive[PrimitiveOpType::Const as usize].clone();
         let const_air = ConstAir::<Val<SC>, D>::new_with_preprocessed(const_rows, const_prep)
@@ -840,7 +1048,7 @@ where
         let const_matrix: RowMajorMatrix<Val<SC>> =
             ConstAir::<Val<SC>, D>::trace_to_matrix(&traces.const_trace, min_height);
 
-        // Public — reduce lanes to 1 if the table has only dummy operations.
+        // Public: reduce lanes to 1 if the table has only dummy operations.
         let public_trace_only_dummy = traces.public_trace.values.len() <= 1;
         let public_lanes = if public_trace_only_dummy && packing.public_lanes() > 1 {
             tracing::warn!(
@@ -854,9 +1062,16 @@ where
             packing.public_lanes()
         };
 
-        // Preprocessed is already in [ext_mult, index] 2-col format.
+        // Preprocessed is [active, ext_mult, index, value[0..D]]. The statement-dependent
+        // value columns are filled from the concrete public trace before committing.
         let public_rows = traces.public_trace.values.len();
-        let public_prep = primitive[PrimitiveOpType::Public as usize].clone();
+        let primitive_public_values =
+            flatten_public_values::<Val<SC>, EF>(&traces.public_trace.values);
+        let mut public_prep = primitive[PrimitiveOpType::Public as usize].clone();
+        bind_public_values_in_preprocessed::<Val<SC>, D>(
+            &mut public_prep,
+            &primitive_public_values,
+        );
         let public_air =
             PublicAir::<Val<SC>, D>::new_with_preprocessed(public_rows, public_lanes, public_prep)
                 .with_min_height(min_height);
@@ -866,7 +1081,7 @@ where
             min_height,
         );
 
-        // ALU — preprocessed is already in 10-col format (with multiplicities) from
+        // ALU: preprocessed is already in 10-col format (with multiplicities) from
         // get_airs_and_degrees_with_prep. When the trace is empty, a dummy row is included.
         let alu_rows = traces.alu_trace.values.len();
         let alu_prep = primitive[PrimitiveOpType::Alu as usize].clone();
@@ -1043,7 +1258,7 @@ where
 
         air_storage.push(CircuitTableAir::Public(public_air));
         trace_storage.push(public_matrix);
-        public_storage.push(Vec::new());
+        public_storage.push(primitive_public_values.clone());
 
         air_storage.push(CircuitTableAir::Alu(alu_air));
         trace_storage.push(alu_matrix);
@@ -1065,25 +1280,18 @@ where
             non_primitive_meta.push((op_type, rows, lanes, AirVariant::Baseline));
         }
 
-        // Use the pre-computed ProverData when the AIR structure is unchanged (common case).
-        // Recompute only when lane reduction altered the lookup layout, since the number of
-        // lookups per table depends on lane count.
-        let lanes_reduced = (alu_trace_only_dummy && packing.alu_lanes() > 1)
-            || (public_trace_only_dummy && packing.public_lanes() > 1);
-        let recomputed_data: Option<ProverData<SC>> = if lanes_reduced {
-            let trace_ext_degree_bits: Vec<usize> = trace_storage
-                .iter()
-                .map(|m| log2_strict_usize(m.height()) + self.config.is_zk())
-                .collect();
-            Some(ProverData::from_airs_and_degrees(
-                &self.config,
-                &mut air_storage,
-                &trace_ext_degree_bits,
-            ))
-        } else {
-            None
-        };
-        let effective_prover_data = recomputed_data.as_ref().unwrap_or(prover_data);
+        // Public values are part of the public table's preprocessed binding. Recompute
+        // ProverData from the effective AIRs for this concrete statement instead of reusing
+        // statement-independent preprocessing.
+        let trace_ext_degree_bits: Vec<usize> = trace_storage
+            .iter()
+            .map(|m| log2_strict_usize(m.height()) + self.config.is_zk())
+            .collect();
+        let effective_prover_data = ProverData::from_airs_and_degrees(
+            &self.config,
+            &mut air_storage,
+            &trace_ext_degree_bits,
+        );
 
         let proof = {
             let trace_refs: Vec<&RowMajorMatrix<Val<SC>>> = trace_storage.iter().collect();
@@ -1137,7 +1345,7 @@ where
                 check_lookups(&debug_instances);
             }
 
-            p3_batch_stark::prove_batch(&self.config, &instances, effective_prover_data)
+            p3_batch_stark::prove_batch(&self.config, &instances, &effective_prover_data)
         };
 
         let dynamic_public_values = public_storage.drain(NUM_PRIMITIVE_TABLES..);
@@ -1168,16 +1376,16 @@ where
             .clone()
             .with_public_alu_lanes(public_lanes, alu_lanes);
 
-        // Populate `stark_common` so the proof is self-binding to the preprocessed metadata.
-        let stark_common = recomputed_data
-            .map(|pd| pd.common)
-            .unwrap_or_else(|| clone_common_data(&prover_data.common));
+        // Populate `stark_common` so the proof carries the preprocessed commitment generated
+        // for the concrete public statement.
+        let stark_common = clone_common_data(&effective_prover_data.common);
 
         Ok(BatchStarkProof {
             proof,
             table_packing: effective_packing,
             rows: RowCounts::new([const_rows_padded, public_rows_padded, alu_rows_padded]),
             alu_variant: self.alu_variant,
+            public_values: primitive_public_values,
             ext_degree: D,
             w_binomial: if D > 1 { w_binomial } else { None },
             alu_quintic_trinomial: alu_quintic,
@@ -1194,8 +1402,8 @@ where
     fn verify<const D: usize>(
         &self,
         proof: &BatchStarkProof<SC>,
+        expected: &BatchStarkVerifierData<SC>,
         w_binomial: Option<Val<SC>>,
-        common: &CommonData<SC>,
     ) -> Result<(), BatchStarkProverError> {
         let prover_index_by_type: BTreeMap<NpoTypeId, usize> = self
             .non_primitive_provers
@@ -1205,30 +1413,35 @@ where
             .collect();
 
         // Rebuild AIRs in the same order as prove.
-        let packing = &proof.table_packing;
+        let packing = &expected.table_packing;
         let public_lanes = packing.public_lanes();
         let alu_lanes = packing.alu_lanes();
         let min_height = packing.min_trace_height();
 
         let const_air = CircuitTableAir::Const(
-            ConstAir::<Val<SC>, D>::new(proof.rows[PrimitiveTable::Const])
+            ConstAir::<Val<SC>, D>::new(expected.rows[PrimitiveTable::Const])
                 .with_min_height(min_height),
         );
+        if expected.public_values.len() % D != 0 {
+            return Err(BatchStarkProverError::MetadataMismatch(
+                "public_values length is not divisible by extension degree".to_string(),
+            ));
+        }
+        let public_ops = expected.public_values.len() / D;
         let public_air = CircuitTableAir::Public(
-            PublicAir::<Val<SC>, D>::new(proof.rows[PrimitiveTable::Public], public_lanes)
-                .with_min_height(min_height),
+            PublicAir::<Val<SC>, D>::new(public_ops, public_lanes).with_min_height(min_height),
         );
         let horner_k = packing.horner_packed_steps();
         let alu_air: CircuitTableAir<SC, D> = if D == 1 {
             CircuitTableAir::Alu(
-                AluAir::<Val<SC>, D>::new(proof.rows[PrimitiveTable::Alu], alu_lanes)
+                AluAir::<Val<SC>, D>::new(expected.rows[PrimitiveTable::Alu], alu_lanes)
                     .with_horner_pack_k(horner_k)
                     .with_min_height(min_height),
             )
-        } else if D == 5 && proof.alu_quintic_trinomial {
+        } else if D == 5 && expected.alu_quintic_trinomial {
             CircuitTableAir::Alu(
                 AluAir::<Val<SC>, D>::new_quintic_trinomial(
-                    proof.rows[PrimitiveTable::Alu],
+                    expected.rows[PrimitiveTable::Alu],
                     alu_lanes,
                 )
                 .with_horner_pack_k(horner_k)
@@ -1237,17 +1450,22 @@ where
         } else {
             let w = w_binomial.ok_or(BatchStarkProverError::MissingWForExtension)?;
             CircuitTableAir::Alu(
-                AluAir::<Val<SC>, D>::new_binomial(proof.rows[PrimitiveTable::Alu], alu_lanes, w)
-                    .with_horner_pack_k(horner_k)
-                    .with_min_height(min_height),
+                AluAir::<Val<SC>, D>::new_binomial(
+                    expected.rows[PrimitiveTable::Alu],
+                    alu_lanes,
+                    w,
+                )
+                .with_horner_pack_k(horner_k)
+                .with_min_height(min_height),
             )
         };
         let mut airs = vec![const_air, public_air, alu_air];
         let mut pvs: Vec<Vec<Val<SC>>> =
-            Vec::with_capacity(NUM_PRIMITIVE_TABLES + proof.non_primitives.len());
+            Vec::with_capacity(NUM_PRIMITIVE_TABLES + expected.non_primitives.len());
         pvs.resize_with(NUM_PRIMITIVE_TABLES, Vec::new);
+        pvs[PrimitiveTable::Public as usize] = expected.public_values.clone();
 
-        for entry in &proof.non_primitives {
+        for entry in &expected.non_primitives {
             let pi = *prover_index_by_type.get(&entry.op_type).ok_or_else(|| {
                 BatchStarkProverError::Verify(format!(
                     "unknown non-primitive op: {:?}",
@@ -1256,7 +1474,7 @@ where
             })?;
             let plugin = &self.non_primitive_provers[pi];
             let air = plugin
-                .batch_air_from_table_entry(&self.config, D, proof.ext_degree as u32, entry)
+                .batch_air_from_table_entry(&self.config, D, expected.ext_degree as u32, entry)
                 .map_err(BatchStarkProverError::Verify)?;
             airs.push(CircuitTableAir::Dynamic(air));
             pvs.push(entry.public_values.clone());
@@ -1267,11 +1485,15 @@ where
         // carries the preprocessed binding, not the lookup contexts.
         let lookups: Vec<Vec<Lookup<Val<SC>>>> = airs.iter_mut().map(|a| a.get_lookups()).collect();
         let effective_common = CommonData::new(
-            common.preprocessed.as_ref().map(|g| GlobalPreprocessed {
-                commitment: g.commitment.clone(),
-                instances: g.instances.clone(),
-                matrix_to_instance: g.matrix_to_instance.clone(),
-            }),
+            expected
+                .stark_common
+                .preprocessed
+                .as_ref()
+                .map(|g| GlobalPreprocessed {
+                    commitment: g.commitment.clone(),
+                    instances: g.instances.clone(),
+                    matrix_to_instance: g.matrix_to_instance.clone(),
+                }),
             lookups,
         );
 

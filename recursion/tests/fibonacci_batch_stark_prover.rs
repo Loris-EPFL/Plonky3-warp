@@ -3,7 +3,9 @@ mod common;
 use p3_batch_stark::ProverData;
 use p3_circuit::CircuitBuilder;
 use p3_circuit::ops::{generate_poseidon2_trace, generate_recompose_trace};
-use p3_circuit_prover::batch_stark_prover::{poseidon2_air_builders, recompose_air_builders};
+use p3_circuit_prover::batch_stark_prover::{
+    PrimitiveTable, poseidon2_air_builders, recompose_air_builders,
+};
 use p3_circuit_prover::common::{NpoPreprocessor, get_airs_and_degrees_with_prep};
 use p3_circuit_prover::{
     BatchStarkProver, CircuitProverData, ConstraintProfile, Poseidon2Preprocessor, Poseidon2Prover,
@@ -113,8 +115,14 @@ fn test_fibonacci_batch_verifier() {
         .prove_all_tables(&traces, &circuit_prover_data)
         .unwrap();
 
-    let common = circuit_prover_data.common_data();
-    prover.verify_all_tables(&batch_stark_proof).unwrap();
+    let verifier_data = batch_stark_proof.self_describing_verifier_data();
+    let common = &verifier_data.stark_common;
+    prover
+        .verify_all_tables(
+            &batch_stark_proof,
+            &batch_stark_proof.self_describing_verifier_data(),
+        )
+        .unwrap();
 
     // Now verify the batch STARK proof recursively
     // Use same permutation as proving to ensure Fiat-Shamir transcript compatibility
@@ -141,13 +149,15 @@ fn test_fibonacci_batch_verifier() {
 
     const TRACE_D: usize = 1; // Proof traces are in base field
 
-    // Public values (empty for all 5 circuit tables: Witness, Const, Public, Alu, Poseidon2)
+    // Public values for all circuit tables. The primitive Public table is bound
+    // by the batch STARK transcript.
     let num_tables = common
         .preprocessed
         .as_ref()
         .map(|g| g.instances.len())
         .unwrap_or(0);
-    let pis: Vec<Vec<F>> = vec![vec![]; num_tables];
+    let mut pis: Vec<Vec<F>> = vec![vec![]; num_tables];
+    pis[PrimitiveTable::Public as usize] = batch_stark_proof.public_values.clone();
 
     // Build the recursive verification circuit
     let mut circuit_builder = CircuitBuilder::new();
@@ -277,7 +287,10 @@ fn test_fibonacci_batch_verifier() {
 
     // Verify the proof of the verification circuit
     verification_prover
-        .verify_all_tables(&verification_proof)
+        .verify_all_tables(
+            &verification_proof,
+            &verification_proof.self_describing_verifier_data(),
+        )
         .expect("Failed to verify proof of verification circuit");
 }
 

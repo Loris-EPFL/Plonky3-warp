@@ -284,7 +284,7 @@ macro_rules! define_field_module_aggregation_quintic {
                     .expect("Failed to prove dummy circuit");
                 report_proof_size(&proof);
                 prover
-                    .verify_all_tables(&proof)
+                    .verify_all_tables(&proof, &proof.self_describing_verifier_data())
                     .expect("Failed to verify dummy proof");
                 RecursionOutput(proof, Rc::new(circuit_prover_data))
             }
@@ -371,7 +371,10 @@ macro_rules! define_field_module_aggregation_quintic {
                                     verifier.register_recompose_table::<D>($poseidon2_config.d() != D);
                                 }
                                 verifier
-                                    .verify_all_tables(&out.0)
+                                    .verify_all_tables(
+                                        &out.0,
+                                        &out.0.self_describing_verifier_data(),
+                                    )
                                     .unwrap_or_else(|e| {
                                         panic!("Verification failed at level {level}, pair {pair_idx}: {e:?}")
                                     });
@@ -474,7 +477,7 @@ macro_rules! define_field_module {
                     .expect("Failed to prove dummy circuit");
                 report_proof_size(&proof);
                 prover
-                    .verify_all_tables(&proof)
+                    .verify_all_tables(&proof, &proof.self_describing_verifier_data())
                     .expect("Failed to verify dummy proof");
                 RecursionOutput(proof, Rc::new(circuit_prover_data))
             }
@@ -517,7 +520,7 @@ macro_rules! define_field_module {
                     .expect("Failed to prove dummy circuit (ZK)");
                 report_proof_size(&proof);
                 prover
-                    .verify_all_tables(&proof)
+                    .verify_all_tables(&proof, &proof.self_describing_verifier_data())
                     .expect("Failed to verify dummy proof (ZK)");
                 RecursionOutput(proof, Rc::new(circuit_prover_data))
             }
@@ -598,7 +601,10 @@ macro_rules! define_field_module {
                                     verifier.register_recompose_table::<$d>($poseidon2_config.d() != $d);
                                 }
                                 verifier
-                                    .verify_all_tables(&out.0)
+                                    .verify_all_tables(
+                                        &out.0,
+                                        &out.0.self_describing_verifier_data(),
+                                    )
                                     .unwrap_or_else(|e| {
                                         panic!("Verification failed at level {level}, pair {pair_idx}: {e:?}")
                                     });

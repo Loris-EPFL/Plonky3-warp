@@ -1,9 +1,9 @@
 //! Direct batched compiler for the WARP root IOP.
 //!
-//! The parent root prover first records the WARP VACC/DACC transcript as
-//! typed opening claims on committed RS oracles. This module is the compact
-//! WHIR-facing reduction for those claims when every oracle is represented by
-//! the same WARP/WHIR Reed-Solomon code `C`.
+//! The parent root prover first records the linear opening claims produced by
+//! WARP VACC replay and by the configured finalizer. This module is the
+//! compact WHIR-facing reduction for those claims when every oracle is
+//! represented by the same WARP/WHIR Reed-Solomon code `C`.
 //!
 //! The algebra follows the same shape as WHIR's linear-Sigma IOP. For an
 //! oracle message `w` and codeword `u = C(w)`, each recorded WARP query is
@@ -16,10 +16,19 @@
 //! For an RS codeword index claim `u[j] = y`, `a_q` is the message-domain
 //! linear functional that evaluates the encoded word at `j`. For a multilinear
 //! codeword claim `hat u(z) = y`, `a_q` is the message-domain pullback of the
-//! equality polynomial `eq_z`. This is exactly the bridge we need between the
+//! equality polynomial `eq_z`. This is the algebraic bridge we need between the
 //! WARP paper's RS accumulator claims and the WHIR paper's constrained-RS
-//! proximity/opening proof: WARP supplies the linear claims, WHIR authenticates
-//! one final batched opening against the committed RS oracles.
+//! proximity/opening proof: WARP supplies the linear claims, and the source
+//! linear-Sigma IOP supplies per-oracle answer arrays whose `V_poly` decision
+//! checks the residual sum. WHIR then authenticates those arrays through its
+//! own combination challenge and constrained-RS proximity phase against the
+//! committed RS oracles. This authentication is WHIR proximity/opening
+//! soundness. It is not an exact full-table codeword-equality proof for WARP's
+//! source-paper Merkle transcript; that identification must be supplied by an
+//! external exact-codeword bridge when the caller invokes WARP's exact
+//! accumulation theorem. For base-field WARP slots, the caller must also have
+//! a typed `F`-valued table or a subfield/alphabet proof; extension-field WHIR
+//! proximity alone can extract an `EF`-valued codeword.
 //!
 //! Fiat-Shamir order in this file is deliberately explicit:
 //! 1. commitments are observed by the caller before this reduction starts,
@@ -29,10 +38,11 @@
 //!    per-oracle targets are bound,
 //! 4. the final virtual opening value is absorbed before WHIR opens it.
 //!
-//! This module does not decide WARP step validity by itself. Soundness comes
-//! from the surrounding root IOP recording every VACC/DACC and finalizer claim,
-//! then using this compiler to prove those recorded linear claims against the
-//! same committed RS codewords.
+//! This module does not decide WARP step validity and does not prove the
+//! nonlinear terminal PESAT equation. Soundness comes from the surrounding root
+//! composition: WARP replay fixes the linear opening claims, this compiler
+//! authenticates them against the same committed RS roots in the WHIR
+//! proximity sense, and the configured finalizer handles DACC.
 
 use super::*;
 
@@ -160,8 +170,9 @@ where
 /// Commitment variant for one batched residual oracle.
 ///
 /// `SharedBase` is the optimized WHIR path for many base-message columns under
-/// one Merkle root: the verifier opens one row and receives the selected
-/// column instead of authenticating independent roots for every WARP oracle.
+/// one Merkle root. The verifier authenticates the shared row opening for the
+/// whole stack and combines the selected column coefficients, instead of
+/// authenticating independent roots for every WARP oracle.
 pub(super) enum NativeWarpBatchedResidualCommitment<Comm> {
     Base(Comm),
     Extension(Comm),
@@ -390,6 +401,11 @@ where
 
     /// Evaluate the batched query weight at the final sumcheck point.
     ///
+    /// The layout-independent identity is
+    /// `<C^T q, eq_r> = <q, C(eq_r)>`. The systematic branches below are
+    /// Plonky3-specific fast paths for the canonical subgroup embedding; they
+    /// are not assumptions from WARP or WHIR.
+    ///
     /// Each constraint is handled independently:
     ///
     /// - systematic message-subspace claims use the ordinary multilinear
@@ -431,7 +447,7 @@ where
                         } else {
                             cache.codeword_mle_value(point)
                         }
-                    } else if point.len() == code.log_msg_len() {
+                    } else if code.is_systematic() && point.len() == code.log_msg_len() {
                         eval_eq_point(message_point, point)
                     } else {
                         cache.codeword_mle_value(point)
@@ -449,7 +465,7 @@ where
 /// polynomials.
 ///
 /// This is the main "one RS code" bridge. WARP records claims about RS
-/// codewords `u = C(w)`; WHIR opens the committed message polynomial `w`.
+/// codewords `u = C(w)`; WHIR authenticates the encoded RS oracle for `w`.
 /// This function computes, for each statement, the message weight `a` such
 /// that `<a, w>` equals the batched WARP target. Systematic message-subspace
 /// claims use a sparse fast path; general codeword/MLE claims use the RS
@@ -559,7 +575,7 @@ where
 }
 
 /// Prove all compact WARP root statements with one batched sumcheck and one
-/// batched WHIR opening claim.
+/// precommitted WHIR residual claim.
 ///
 /// For oracle messages `w_k`, per-oracle batched weights `a_k`, and targets
 /// `t_k`, the prover first checks the WARP-derived linear equations
@@ -575,14 +591,17 @@ where
 /// ```
 ///
 /// The sumcheck leaves a random message point `r` and coefficients
-/// `c_k = rho^k a_k(r)`. WHIR then authenticates the residual opening
+/// `c_k = rho^k a_k(r)`. At the WHIR-source level this becomes the
+/// `V_poly` check over answer-array entries
 ///
 /// ```text
 ///     sum_k c_k w_k(r) = v.
 /// ```
 ///
-/// That final batched opening is the only PCS/WHIR opening needed by the root
-/// proof when all statements are in this compact path.
+/// The grouped WHIR proof then applies its own virtual-combination and
+/// constrained-RS proximity checks to bind those entries to the committed
+/// oracles. That residual query is the only polynomial-IOP query needed by the
+/// root proof when all statements are in this compact path.
 pub(super) fn prove_compact_batched_root_reduction<F, EF, Dft, Challenger>(
     code: &ReedSolomonCode<F, Dft>,
     statements: &[NativeWarpCompactRootStatement<EF>],
@@ -907,6 +926,35 @@ mod tests {
             scale *= gamma;
         }
 
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn coefficient_rate_one_mle_weight_uses_encoded_equality() {
+        let code = ReedSolomonCode::new_coefficient(3, 0, Dft::default());
+        assert!(!code.is_systematic());
+        assert_eq!(code.log_msg_len(), code.log_codeword_len());
+
+        let mut statement = NativeWarpCompactRootStatement::initialize(code.log_msg_len());
+        let codeword_point = vec![EF::from_u64(3), EF::from_u64(5), EF::from_u64(7)];
+        statement.add_mle(codeword_point.clone(), EF::from_u64(11));
+
+        let sumcheck_point = vec![EF::from_u64(13), EF::from_u64(17), EF::from_u64(19)];
+        let gamma = EF::from_u64(23);
+        let mut cache = EncodedMessageEqCache::new(&code, &sumcheck_point);
+        let actual = statement.batched_weight_eval_at_sumcheck_point::<F, Dft>(
+            &code,
+            &sumcheck_point,
+            gamma,
+            &mut cache,
+        );
+
+        let message_eq = Poly::<EF>::new_from_point(&sumcheck_point, EF::ONE);
+        let encoded_eq = code.encode_algebra(message_eq.as_slice());
+        let expected = Poly::new(encoded_eq).eval_ext::<F>(&Point::new(codeword_point.clone()));
+        let unsound_shortcut = eval_eq_point(&sumcheck_point, &codeword_point);
+
+        assert_ne!(unsound_shortcut, expected);
         assert_eq!(actual, expected);
     }
 }

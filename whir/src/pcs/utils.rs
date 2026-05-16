@@ -80,6 +80,26 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
+    get_challenge_stir_queries_with_samples::<Challenger, F, EF>(
+        domain_size,
+        folding_factor,
+        num_queries,
+        challenger,
+    )
+    .map(|(queries, _samples)| queries)
+}
+
+pub fn get_challenge_stir_queries_with_samples<Challenger, F, EF>(
+    domain_size: usize,
+    folding_factor: usize,
+    num_queries: usize,
+    challenger: &mut Challenger,
+) -> Result<(Vec<usize>, Vec<usize>), FiatShamirError>
+where
+    Challenger: FieldChallenger<F> + CanSampleUniformBits<F>,
+    F: Field,
+    EF: ExtensionField<F>,
+{
     // Phase 1: derive the addressable folded domain.
     //
     //   folded_domain_size = domain_size >> folding_factor
@@ -103,6 +123,7 @@ where
     //     append q if not already present
     //   until len == target
     let mut queries: Vec<usize> = Vec::with_capacity(target);
+    let mut samples: Vec<usize> = Vec::with_capacity(target);
     while queries.len() < target {
         // RESAMPLE = true: the impl loops on field-side rejection internally.
         //
@@ -110,6 +131,7 @@ where
         let q = challenger
             .sample_uniform_bits::<true>(domain_size_bits)
             .expect("RESAMPLE = true: rejection loops internally, never errors");
+        samples.push(q);
 
         if !queries.contains(&q) {
             queries.push(q);
@@ -118,7 +140,7 @@ where
 
     // Phase 4: verifier and Merkle-proof code consume ascending indices.
     queries.sort_unstable();
-    Ok(queries)
+    Ok((queries, samples))
 }
 
 #[cfg(test)]

@@ -3,11 +3,13 @@
 //! Pipeline (Construction 10.4 specialised to RS):
 //!
 //! 1. **PESAT reduction (§5.10).** For each fresh witness `w_i ∈ F^k`,
-//!    encode `f_i = C(w_i)`, set `µ_i = f̂_i(0)`, `α_i = 0`, `β_i = (τ_i, x_i) = τ_i`
-//!    (κ = 0 in v1), `η_i = 0`. Stack the `ℓ_1` codewords as one Merkle
-//!    commitment `rt_0`.
+//!    encode `f_i = C(w_i)`, set `µ_i = f̂_i(0)`, `α_i = 0`, and set
+//!    `β_i` to the PESAT layout `(bundling randomness, explicit instance)`.
+//!    In v1, `κ = 0`, so `β_i` contains only the bundling coordinates and
+//!    `η_i = 0`. Stack the `ℓ_1` codewords as one Merkle commitment `rt_0`.
 //!
-//! 2. **Twin-constraint pseudo-batching (§6.3).** Sample `ω, τ`. Run
+//! 2. **Twin-constraint pseudo-batching (§6.3).** Sample the WARP selector
+//!    challenge and scalar `ω`. Run
 //!    `log ℓ` rounds of the high-degree sumcheck folding the `(F̂, ŵ, Â, B̂)`
 //!    tables into a single merged `(f, w, ζ_0, β)`.
 //!
@@ -191,13 +193,13 @@ where
         let log_l = l.trailing_zeros() as usize;
 
         let shape = self.pesat.shape();
-        let log_m = shape.log_constraints;
+        let log_constraints = shape.log_constraints;
         let log_n = self.code.log_codeword_len();
         let log_h = log_n - self.code.log_inv_rate();
         let n = self.code.codeword_len();
         let k = self.code.msg_len();
         let beta_len = shape.beta_len();
-        assert_eq!(beta_len, log_m + shape.explicit_len);
+        assert_eq!(beta_len, log_constraints + shape.explicit_len);
 
         // ---------- 1. Bind protocol parameters into the transcript. ----------
         bind_protocol::<F, _>(
@@ -221,7 +223,7 @@ where
             self.code.encode_batch(fresh_witnesses)
         };
 
-        // µ_i = f̂_i(0^{log n}) = f_i[0].
+        // mu_i = f_hat_i(0^{log_codeword_len}) = f_i[0].
         let mu_fresh: Vec<EF> = (0..l1).map(|i| EF::from(fresh_matrix.values[i])).collect();
 
         // Keep per-codeword columns for the twin-constraint folding tables.
@@ -251,11 +253,13 @@ where
             challenger.observe_algebra_element(acc.instance.eta);
         }
 
-        // ---------- 4. Sample τ_i for each fresh PESAT (zerocheck randomness). ----------
-        // Per §5.10: τ_i ∈ EF^{log M}, β_i = τ_i (κ = 0), η_i = 0, α_i = 0^{log n}.
+        // ---------- 4. Sample PESAT bundling coordinates for each fresh instance. ----------
+        // Per §5.10, β_i = (bundling randomness, explicit instance).
+        // In v1, κ = 0, so β_i is just the `log_constraints` bundling prefix,
+        // η_i = 0, and α_i = 0^{log_codeword_len}.
         let fresh_taus: Vec<Vec<EF>> = (0..l1)
             .map(|_| {
-                (0..log_m)
+                (0..log_constraints)
                     .map(|_| challenger.sample_algebra_element())
                     .collect()
             })
@@ -270,7 +274,7 @@ where
             f_table.push(fresh_codewords[i].iter().map(|&x| EF::from(x)).collect());
             w_table.push(fresh_witnesses[i].iter().map(|&x| EF::from(x)).collect());
             a_table.push(vec![EF::ZERO; log_n]); // α_i = 0
-            b_table.push(fresh_taus[i].clone()); // β_i = τ_i (κ = 0)
+            b_table.push(fresh_taus[i].clone()); // β_i has only the bundling prefix (κ = 0).
         }
         for acc in prior_accumulators {
             assert_eq!(acc.witness.f.len(), n, "prior acc f has wrong length");
@@ -283,13 +287,13 @@ where
             b_table.push(acc.instance.beta.clone());
         }
 
-        // ---------- 6. Sample (ω, τ) for the §6.3 sumcheck. ----------
+        // ---------- 6. Sample (ω, τ_selector) for the §6.3 sumcheck. ----------
         let omega: EF = challenger.sample_algebra_element();
         let tau: Vec<EF> = (0..log_l)
             .map(|_| challenger.sample_algebra_element())
             .collect();
 
-        // Initial sum σ⁽¹⁾ = Σ_i eq(τ, i) · (µ_i + ω · η_i).
+        // Initial sum σ⁽¹⁾ = Σ_i eq(τ_selector, i) · (µ_i + ω · η_i).
         let mut all_mus: Vec<EF> = mu_fresh.clone();
         let mut all_etas: Vec<EF> = vec![EF::ZERO; l1];
         for acc in prior_accumulators {
@@ -303,7 +307,7 @@ where
             .sum();
 
         // ---------- 7. §6.3 twin-constraint sumcheck. ----------
-        let d1 = self.twin_round_poly_degree(log_n, log_m, shape.max_degree);
+        let d1 = self.twin_round_poly_degree(log_n, log_constraints, shape.max_degree);
         let mut twin_proof = SumcheckProof::<EF>::new();
         let mut gamma = Vec::with_capacity(log_l);
         for _ in 0..log_l {
@@ -315,7 +319,7 @@ where
                 &b_table,
                 &current_eq,
                 omega,
-                log_m,
+                log_constraints,
             );
             let g = observe_and_sample::<F, EF, _>(&mut twin_proof, challenger, coeffs);
             gamma.push(g);
@@ -338,8 +342,8 @@ where
         let zeta_0_pt = Point::<EF>::new(zeta_0.clone());
         let nu_0: EF = f_poly.eval_ext::<F>(&zeta_0_pt);
 
-        let beta_tau = &beta_final[..log_m];
-        let beta_x = &beta_final[log_m..];
+        let beta_tau = &beta_final[..log_constraints];
+        let beta_x = &beta_final[log_constraints..];
         let mut z_for_eta = Vec::with_capacity(beta_x.len() + w_merged.len());
         z_for_eta.extend_from_slice(beta_x);
         z_for_eta.extend_from_slice(&w_merged);
@@ -758,13 +762,13 @@ where
         let log_l = l.trailing_zeros() as usize;
 
         let shape = self.pesat.shape();
-        let log_m = shape.log_constraints;
+        let log_constraints = shape.log_constraints;
         let log_n = self.code.log_codeword_len();
         let log_h = log_n - self.code.log_inv_rate();
         let n = self.code.codeword_len();
         let k = self.code.msg_len();
         let beta_len = shape.beta_len();
-        assert_eq!(beta_len, log_m + shape.explicit_len);
+        assert_eq!(beta_len, log_constraints + shape.explicit_len);
 
         // ---------- 1. Bind protocol parameters into the transcript. ----------
         bind_protocol::<F, _>(
@@ -788,9 +792,14 @@ where
                 "fresh codeword length must be n = {n}"
             );
             assert_eq!(c.witness().len(), k, "fresh witness length must be k = {k}");
+            let expected_codeword = self.code.encode(c.witness());
+            assert!(
+                c.codeword() == expected_codeword.as_slice(),
+                "fresh codeword must equal C(witness)"
+            );
         }
 
-        // µ_i = f̂_i(0^{log n}) = f_i[0].
+        // mu_i = f_hat_i(0^{log_codeword_len}) = f_i[0].
         let mu_fresh: Vec<EF> = fresh_committed
             .iter()
             .map(|c| EF::from(c.codeword()[0]))
@@ -816,10 +825,10 @@ where
             challenger.observe_algebra_element(acc.instance.eta);
         }
 
-        // ---------- 4. Sample τ_i for each fresh PESAT. ----------
+        // ---------- 4. Sample PESAT bundling coordinates for each fresh instance. ----------
         let fresh_taus: Vec<Vec<EF>> = (0..l1)
             .map(|_| {
-                (0..log_m)
+                (0..log_constraints)
                     .map(|_| challenger.sample_algebra_element())
                     .collect()
             })
@@ -834,7 +843,7 @@ where
             f_table.push(c.codeword().iter().map(|&x| EF::from(x)).collect());
             w_table.push(c.witness().iter().map(|&x| EF::from(x)).collect());
             a_table.push(vec![EF::ZERO; log_n]); // α_i = 0
-            b_table.push(fresh_taus[i].clone()); // β_i = τ_i (κ = 0)
+            b_table.push(fresh_taus[i].clone()); // β_i has only the bundling prefix (κ = 0).
         }
         for acc in prior_accumulators {
             assert_eq!(acc.witness.f.len(), n, "prior acc f has wrong length");
@@ -847,13 +856,13 @@ where
             b_table.push(acc.instance.beta.clone());
         }
 
-        // ---------- 6. Sample (ω, τ) for the §6.3 sumcheck. ----------
+        // ---------- 6. Sample (ω, τ_selector) for the §6.3 sumcheck. ----------
         let omega: EF = challenger.sample_algebra_element();
         let tau: Vec<EF> = (0..log_l)
             .map(|_| challenger.sample_algebra_element())
             .collect();
 
-        // Initial sum σ⁽¹⁾ = Σ_i eq(τ, i) · (µ_i + ω · η_i).
+        // Initial sum σ⁽¹⁾ = Σ_i eq(τ_selector, i) · (µ_i + ω · η_i).
         let mut all_mus: Vec<EF> = mu_fresh.clone();
         let mut all_etas: Vec<EF> = vec![EF::ZERO; l1];
         for acc in prior_accumulators {
@@ -867,7 +876,7 @@ where
             .sum();
 
         // ---------- 7. §6.3 twin-constraint sumcheck. ----------
-        let d1 = self.twin_round_poly_degree(log_n, log_m, shape.max_degree);
+        let d1 = self.twin_round_poly_degree(log_n, log_constraints, shape.max_degree);
         let mut twin_proof = SumcheckProof::<EF>::new();
         let mut gamma = Vec::with_capacity(log_l);
         for _ in 0..log_l {
@@ -879,7 +888,7 @@ where
                 &b_table,
                 &current_eq,
                 omega,
-                log_m,
+                log_constraints,
             );
             let g = observe_and_sample::<F, EF, _>(&mut twin_proof, challenger, coeffs);
             gamma.push(g);
@@ -901,8 +910,8 @@ where
         let zeta_0_pt = Point::<EF>::new(zeta_0.clone());
         let nu_0: EF = f_poly.eval_ext::<F>(&zeta_0_pt);
 
-        let beta_tau = &beta_final[..log_m];
-        let beta_x = &beta_final[log_m..];
+        let beta_tau = &beta_final[..log_constraints];
+        let beta_x = &beta_final[log_constraints..];
         let mut z_for_eta = Vec::with_capacity(beta_x.len() + w_merged.len());
         z_for_eta.extend_from_slice(beta_x);
         z_for_eta.extend_from_slice(&w_merged);
@@ -1200,13 +1209,13 @@ where
         let log_l = l.trailing_zeros() as usize;
 
         let shape = self.pesat.shape();
-        let log_m = shape.log_constraints;
+        let log_constraints = shape.log_constraints;
         let log_n = self.code.log_codeword_len();
         let log_h = log_n - self.code.log_inv_rate();
         let n = self.code.codeword_len();
         let k = self.code.msg_len();
         let beta_len = shape.beta_len();
-        assert_eq!(beta_len, log_m + shape.explicit_len);
+        assert_eq!(beta_len, log_constraints + shape.explicit_len);
 
         bind_protocol::<F, _>(
             challenger,
@@ -1226,6 +1235,11 @@ where
                 "fresh codeword length must be n = {n}"
             );
             assert_eq!(c.witness().len(), k, "fresh witness length must be k = {k}");
+            let expected_codeword = self.code.encode(c.witness());
+            assert!(
+                c.codeword() == expected_codeword.as_slice(),
+                "fresh codeword must equal C(witness)"
+            );
         }
 
         let mu_fresh: Vec<EF> = fresh_committed
@@ -1253,20 +1267,26 @@ where
 
         let fresh_taus: Vec<Vec<EF>> = (0..l1)
             .map(|_| {
-                (0..log_m)
+                (0..log_constraints)
                     .map(|_| challenger.sample_algebra_element())
                     .collect()
             })
             .collect();
 
-        let mut f_table: Vec<Vec<EF>> = Vec::with_capacity(l);
+        let fresh_only_step = l2 == 0;
+        let mut f_table: Vec<Vec<EF>> = Vec::with_capacity(if fresh_only_step { 0 } else { l });
+        let mut f_first_table: Vec<EF> = Vec::with_capacity(if fresh_only_step { l } else { 0 });
         let mut w_table: Vec<Vec<EF>> = Vec::with_capacity(l);
-        let mut a_table: Vec<Vec<EF>> = Vec::with_capacity(l);
+        let mut a_table: Vec<Vec<EF>> = Vec::with_capacity(if fresh_only_step { 0 } else { l });
         let mut b_table: Vec<Vec<EF>> = Vec::with_capacity(l);
         for (i, c) in fresh_committed.iter().enumerate() {
-            f_table.push(c.codeword().iter().map(|&x| EF::from(x)).collect());
+            if fresh_only_step {
+                f_first_table.push(EF::from(c.codeword()[0]));
+            } else {
+                f_table.push(c.codeword().iter().map(|&x| EF::from(x)).collect());
+                a_table.push(vec![EF::ZERO; log_n]);
+            }
             w_table.push(c.witness().iter().map(|&x| EF::from(x)).collect());
-            a_table.push(vec![EF::ZERO; log_n]);
             b_table.push(fresh_taus[i].clone());
         }
         for acc in &mut prior_accumulators {
@@ -1297,41 +1317,71 @@ where
             .map(|i| current_eq[i] * (all_mus[i] + omega * all_etas[i]))
             .sum();
 
-        let d1 = self.twin_round_poly_degree(log_n, log_m, shape.max_degree);
+        let d1 = self.twin_round_poly_degree(log_n, log_constraints, shape.max_degree);
         let mut twin_proof = SumcheckProof::<EF>::new();
         let mut gamma = Vec::with_capacity(log_l);
         for _ in 0..log_l {
-            let coeffs = self.compute_twin_round_coeffs(
-                d1,
-                &f_table,
-                &w_table,
-                &a_table,
-                &b_table,
-                &current_eq,
-                omega,
-                log_m,
-            );
+            let coeffs = if fresh_only_step {
+                self.compute_fresh_only_twin_round_coeffs(
+                    d1,
+                    &f_first_table,
+                    &w_table,
+                    &b_table,
+                    &current_eq,
+                    omega,
+                )
+            } else {
+                self.compute_twin_round_coeffs(
+                    d1,
+                    &f_table,
+                    &w_table,
+                    &a_table,
+                    &b_table,
+                    &current_eq,
+                    omega,
+                    log_constraints,
+                )
+            };
             let g = observe_and_sample::<F, EF, _>(&mut twin_proof, challenger, coeffs);
             gamma.push(g);
-            f_table = fold_table(f_table, g);
+            if fresh_only_step {
+                f_first_table = fold_eq(f_first_table, g);
+            } else {
+                f_table = fold_table(f_table, g);
+                a_table = fold_table(a_table, g);
+            }
             w_table = fold_table(w_table, g);
-            a_table = fold_table(a_table, g);
             b_table = fold_table(b_table, g);
             current_eq = fold_eq(current_eq, g);
         }
-        debug_assert_eq!(f_table.len(), 1);
+        if fresh_only_step {
+            debug_assert_eq!(f_first_table.len(), 1);
+        } else {
+            debug_assert_eq!(f_table.len(), 1);
+        }
 
-        let f_merged = f_table.into_iter().next().unwrap();
+        let f_merged = if fresh_only_step {
+            let merged =
+                fold_fresh_codewords_to_merged::<F, EF, Fresh>(&fresh_committed, &gamma, n);
+            debug_assert_eq!(merged[0], f_first_table[0]);
+            merged
+        } else {
+            f_table.into_iter().next().unwrap()
+        };
         let w_merged = w_table.into_iter().next().unwrap();
-        let zeta_0 = a_table.into_iter().next().unwrap();
+        let zeta_0 = if fresh_only_step {
+            vec![EF::ZERO; log_n]
+        } else {
+            a_table.into_iter().next().unwrap()
+        };
         let beta_final = b_table.into_iter().next().unwrap();
 
         let f_poly = Poly::<EF>::new(f_merged.clone());
         let zeta_0_pt = Point::<EF>::new(zeta_0.clone());
         let nu_0: EF = f_poly.eval_ext::<F>(&zeta_0_pt);
 
-        let beta_tau = &beta_final[..log_m];
-        let beta_x = &beta_final[log_m..];
+        let beta_tau = &beta_final[..log_constraints];
+        let beta_x = &beta_final[log_constraints..];
         let mut z_for_eta = Vec::with_capacity(beta_x.len() + w_merged.len());
         z_for_eta.extend_from_slice(beta_x);
         z_for_eta.extend_from_slice(&w_merged);
@@ -1553,9 +1603,10 @@ where
         )
     }
 
-    /// §6.3 round-polynomial degree: `1 + max{log n + 1, log M + d}`.
-    fn twin_round_poly_degree(&self, log_n: usize, log_m: usize, d: usize) -> usize {
-        1 + (log_n + 1).max(log_m + d)
+    /// §6.3 round-polynomial degree:
+    /// `1 + max{log_codeword_len + 1, log_constraints + d}`.
+    fn twin_round_poly_degree(&self, log_n: usize, log_constraints: usize, d: usize) -> usize {
+        1 + (log_n + 1).max(log_constraints + d)
     }
 
     /// Compute the §6.3 round polynomial in **coefficient form** via Lemma 6.4
@@ -1568,23 +1619,25 @@ where
     /// where, with `c_lerp(X) = (1 − X) · c_lo + X · c_hi`,
     /// - `eq_τ_{i'}(X) = (1 − X) · eq_table[i'] + X · eq_table[i' + half]`
     /// - `û_{i'}(X)   = Σ_{b ∈ [n)} eq(A_{i'}(X), b) · F̂_{i', b}(X)`
-    ///   (Claim 6.5: `m = log n`, `d = 1`, cost `O(n)` per `i'`).
-    /// - `pb_{i'}(X)  = Σ_{c ∈ [M)} eq(B_τ_{i'}(X), c) · p̂_c(B_x_{i'}(X), W_{i'}(X))`
-    ///   (Claim 6.5: `m = log M`, `d = PESAT degree`, cost `O(M · d)` per `i'` —
-    ///   delegated to [`BundledPesat::bundled_round_poly`]).
+    ///   (Claim 6.5's local `m = log_codeword_len`, `d = 1`, cost `O(n)` per
+    ///   `i'`).
+    /// - `pb_{i'}(X)  = Σ_{c ∈ [M_pesat)} eq(B_τ_{i'}(X), c) · p̂_c(B_x_{i'}(X), W_{i'}(X))`
+    ///   (Claim 6.5's local `m = log_constraints`, `d = PESAT degree`, cost
+    ///   `O(M_pesat · d)` per `i'` — delegated to
+    ///   [`BundledPesat::bundled_round_poly`]).
     ///
     /// # Cost
     ///
-    /// `O(half · (n + M · d))` field ops per round (paper Lemma 6.4
-    /// asymptote), versus `O(half · (D₁+1) · (n + M))` for the previous
+    /// `O(half · (n + M_pesat · d))` field ops per round (paper Lemma 6.4
+    /// asymptote), versus `O(half · (D₁+1) · (n + M_pesat))` for the previous
     /// "evaluate at `D₁+1` integer α points + Lagrange-interpolate" path.
-    /// The win factor is `~D₁ / 1 = log n + log M + d`.
+    /// The win factor is `~D₁ / 1 = log_codeword_len + log_constraints + d`.
     ///
     /// The codeword side uses Claim 6.5 directly. High-order variables are
     /// folded over `EF::ExtensionPacking`, then the final SIMD-lane variables
     /// are folded scalar after unpacking. This preserves the MSB-first
     /// hypercube convention used by `Poly::new_from_point` and avoids the old
-    /// `(log n + 2)` evaluations plus interpolation.
+    /// `(log_codeword_len + 2)` evaluations plus interpolation.
     #[allow(clippy::too_many_arguments)]
     fn compute_twin_round_coeffs(
         &self,
@@ -1595,7 +1648,7 @@ where
         b_table: &[Vec<EF>],
         eq_table: &[EF],
         omega: EF,
-        _log_m: usize,
+        _log_constraints: usize,
     ) -> Vec<EF> {
         let half = f_table.len() / 2;
         let n = f_table[0].len();
@@ -1612,11 +1665,12 @@ where
         //
         // We parallelise across `i` (the bundling axis) instead of within a
         // single `i`'s inner work — each `i` is a coarse-grained task with
-        // O(n + M·d) work, comfortably above the rayon split-overhead floor.
+        // O(n + M_pesat·d) work, comfortably above the rayon split-overhead
+        // floor.
         // PAR_THRESHOLD chosen analogously to whir (`PAR_THRESHOLD = 1 << 14`):
-        // each `i` does ~`(log n + 2) · (n / W) + M · d` field ops; we go
-        // parallel once `half · per_i_work` clears ~2^14 effective ops, which
-        // for our scales (`n ≥ 1024`) means `half ≥ 2` is already worth it.
+        // each `i` does roughly
+        // `(log_codeword_len + 2) · (n / W) + M_pesat · d` field ops; we go
+        // parallel once `half · per_i_work` clears ~2^14 effective ops.
         if half >= 2 && n >= 1024 {
             (0..half)
                 .into_par_iter()
@@ -1657,6 +1711,75 @@ where
                     f_table,
                     w_table,
                     a_table,
+                    b_table,
+                    eq_table,
+                    omega,
+                    &mut scratch,
+                );
+            }
+            scratch.acc
+        }
+    }
+
+    /// Fresh-only twin-constraint round polynomial.
+    ///
+    /// When a WARP step has no prior accumulators, every `α` row is the zero
+    /// point. The codeword side of Claim 6.5 then collapses to
+    /// `f_lo[0] + X(f_hi[0] - f_lo[0])`; the full `n`-entry codeword rows are
+    /// not needed until the merged accumulator codeword is committed after the
+    /// twin sumcheck challenges are known. This mirrors the fused evaluator
+    /// strategy used in the Arkworks WARP implementation while preserving the
+    /// exact transcript and round polynomial.
+    fn compute_fresh_only_twin_round_coeffs(
+        &self,
+        d1: usize,
+        f_first_table: &[EF],
+        w_table: &[Vec<EF>],
+        b_table: &[Vec<EF>],
+        eq_table: &[EF],
+        omega: EF,
+    ) -> Vec<EF> {
+        let half = f_first_table.len() / 2;
+        let n = w_table[0].len();
+
+        if half >= 2 && n >= 1024 {
+            (0..half)
+                .into_par_iter()
+                .par_fold_reduce(
+                    || TwinRoundScratch::<F, EF>::new(d1),
+                    |mut scratch, i| {
+                        add_fresh_only_twin_round_contribution::<F, EF, Pesat>(
+                            self.pesat,
+                            d1,
+                            i,
+                            half,
+                            f_first_table,
+                            w_table,
+                            b_table,
+                            eq_table,
+                            omega,
+                            &mut scratch,
+                        );
+                        scratch
+                    },
+                    |mut a, b| {
+                        for (lhs, rhs) in a.acc.iter_mut().zip(b.acc.into_iter()) {
+                            *lhs += rhs;
+                        }
+                        a
+                    },
+                )
+                .acc
+        } else {
+            let mut scratch = TwinRoundScratch::<F, EF>::new(d1);
+            for i in 0..half {
+                add_fresh_only_twin_round_contribution::<F, EF, Pesat>(
+                    self.pesat,
+                    d1,
+                    i,
+                    half,
+                    f_first_table,
+                    w_table,
                     b_table,
                     eq_table,
                     omega,
@@ -1732,38 +1855,90 @@ fn add_twin_round_contribution<F, EF, Pesat>(
         &mut scratch.constraint,
     );
 
+    add_twin_coeffs_to_acc(
+        d1,
+        eq_table[i],
+        eq_table[i + half],
+        &scratch.codeword_coeffs,
+        &scratch.constraint_coeffs,
+        omega,
+        &mut scratch.acc,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_fresh_only_twin_round_contribution<F, EF, Pesat>(
+    pesat: &Pesat,
+    d1: usize,
+    i: usize,
+    half: usize,
+    f_first_table: &[EF],
+    w_table: &[Vec<EF>],
+    b_table: &[Vec<EF>],
+    eq_table: &[EF],
+    omega: EF,
+    scratch: &mut TwinRoundScratch<F, EF>,
+) where
+    F: Field,
+    EF: ExtensionField<F>,
+    Pesat: BundledPesat<F, EF>,
+{
+    scratch.codeword_coeffs.clear();
+    scratch.codeword_coeffs.push(f_first_table[i]);
+    scratch
+        .codeword_coeffs
+        .push(f_first_table[i + half] - f_first_table[i]);
+
+    pesat.bundled_round_poly_into(
+        &b_table[i],
+        &b_table[i + half],
+        &w_table[i],
+        &w_table[i + half],
+        &mut scratch.constraint_coeffs,
+        &mut scratch.constraint,
+    );
+
+    add_twin_coeffs_to_acc(
+        d1,
+        eq_table[i],
+        eq_table[i + half],
+        &scratch.codeword_coeffs,
+        &scratch.constraint_coeffs,
+        omega,
+        &mut scratch.acc,
+    );
+}
+
+fn add_twin_coeffs_to_acc<EF>(
+    d1: usize,
+    eq_lo: EF,
+    eq_hi: EF,
+    codeword_coeffs: &[EF],
+    constraint_coeffs: &[EF],
+    omega: EF,
+    acc: &mut [EF],
+) where
+    EF: Field,
+{
     // Build g_i(X) = û_i(X) + ω · pb_i(X), then multiply by linear
     // eq_τ_i(X) = eq_lo + (eq_hi − eq_lo) · X. This writes directly into
     // the fold accumulator. The order and coefficients are identical to the
     // previous local-vector path; only allocation strategy changes.
-    let eq_lo = eq_table[i];
-    let eq_diff = eq_table[i + half] - eq_lo;
-    let g_len = scratch
-        .codeword_coeffs
-        .len()
-        .max(scratch.constraint_coeffs.len());
+    let eq_diff = eq_hi - eq_lo;
+    let g_len = codeword_coeffs.len().max(constraint_coeffs.len());
     debug_assert!(g_len <= d1);
     for k in 0..=g_len {
-        let mut g_k = EF::ZERO;
-        if k < scratch.codeword_coeffs.len() {
-            g_k += scratch.codeword_coeffs[k];
-        }
-        if k < scratch.constraint_coeffs.len() {
-            g_k += omega * scratch.constraint_coeffs[k];
-        }
-
-        let mut g_k_minus_1 = EF::ZERO;
-        if k > 0 {
+        let g_k = codeword_coeffs.get(k).copied().unwrap_or(EF::ZERO)
+            + omega * constraint_coeffs.get(k).copied().unwrap_or(EF::ZERO);
+        let g_k_minus_1 = if k == 0 {
+            EF::ZERO
+        } else {
             let km1 = k - 1;
-            if km1 < scratch.codeword_coeffs.len() {
-                g_k_minus_1 += scratch.codeword_coeffs[km1];
-            }
-            if km1 < scratch.constraint_coeffs.len() {
-                g_k_minus_1 += omega * scratch.constraint_coeffs[km1];
-            }
-        }
+            codeword_coeffs.get(km1).copied().unwrap_or(EF::ZERO)
+                + omega * constraint_coeffs.get(km1).copied().unwrap_or(EF::ZERO)
+        };
 
-        scratch.acc[k] += g_k * eq_lo + g_k_minus_1 * eq_diff;
+        acc[k] += g_k * eq_lo + g_k_minus_1 * eq_diff;
     }
 }
 
@@ -2108,7 +2283,7 @@ mod tests {
     use p3_field::extension::BinomialExtensionField;
 
     use super::*;
-    use crate::relation::lagrange_interpolate_int_points;
+    use crate::relation::{BooleanPesat, lagrange_interpolate_int_points};
 
     type TestF = BabyBear;
     type TestEF = BinomialExtensionField<TestF, 4>;
@@ -2201,6 +2376,62 @@ mod tests {
         let actual = codeword_claim_6_5_coeffs::<TestF, TestEF>(&f_lo, &f_hi, &a_lo, &a_hi);
         assert_eq!(actual, vec![f_lo[0], f_hi[0] - f_lo[0]]);
     }
+
+    #[test]
+    fn fresh_only_twin_round_contribution_matches_general_zero_alpha() {
+        let log_n = 5;
+        let n = 1 << log_n;
+        let l = 4;
+        let half = l / 2;
+        let pesat = BooleanPesat::<TestF, TestEF>::new(log_n, b"test".to_vec());
+        let shape = pesat.shape();
+        let d1 = 1 + (log_n + 1).max(shape.log_constraints + shape.max_degree);
+        let f_table = (0..l)
+            .map(|i| deterministic_vec(n, 7 + 53 * i as u64))
+            .collect::<Vec<_>>();
+        let w_table = (0..l)
+            .map(|i| deterministic_vec(n, 11 + 67 * i as u64))
+            .collect::<Vec<_>>();
+        let a_table = vec![vec![TestEF::ZERO; log_n]; l];
+        let b_table = (0..l)
+            .map(|i| deterministic_vec(log_n, 19 + 71 * i as u64))
+            .collect::<Vec<_>>();
+        let eq_table = deterministic_vec(l, 101);
+        let f_first_table = f_table.iter().map(|row| row[0]).collect::<Vec<_>>();
+        let omega = TestEF::from_u64(313);
+
+        let mut general = TwinRoundScratch::<TestF, TestEF>::new(d1);
+        let mut fast = TwinRoundScratch::<TestF, TestEF>::new(d1);
+        for i in 0..half {
+            add_twin_round_contribution::<TestF, TestEF, _>(
+                &pesat,
+                d1,
+                i,
+                half,
+                &f_table,
+                &w_table,
+                &a_table,
+                &b_table,
+                &eq_table,
+                omega,
+                &mut general,
+            );
+            add_fresh_only_twin_round_contribution::<TestF, TestEF, _>(
+                &pesat,
+                d1,
+                i,
+                half,
+                &f_first_table,
+                &w_table,
+                &b_table,
+                &eq_table,
+                omega,
+                &mut fast,
+            );
+        }
+
+        assert_eq!(fast.acc, general.acc);
+    }
 }
 
 /// Componentwise linear interpolation into the left-hand vector.
@@ -2219,6 +2450,57 @@ where
             *l = lerp(*l, r, alpha);
         }
     }
+}
+
+/// Fold fresh base-field codewords into the final extension-field accumulator
+/// row using the already sampled twin-sumcheck challenges.
+///
+/// This is the fresh-only analogue of repeatedly calling [`fold_table`], but
+/// it materializes only the first folded extension rows instead of first
+/// lifting every fresh codeword to `EF`.
+fn fold_fresh_codewords_to_merged<F, EF, Fresh>(
+    fresh_committed: &[Fresh],
+    challenges: &[EF],
+    n: usize,
+) -> Vec<EF>
+where
+    F: Field,
+    EF: ExtensionField<F> + Send + Sync,
+    Fresh: ExternalCommittedCodeword<F>,
+{
+    debug_assert!(!challenges.is_empty());
+    debug_assert_eq!(fresh_committed.len(), 1 << challenges.len());
+
+    let first = challenges[0];
+    let half = fresh_committed.len() / 2;
+    let mut rows = Vec::with_capacity(half);
+    for i in 0..half {
+        let lo = fresh_committed[i].codeword();
+        let hi = fresh_committed[i + half].codeword();
+        debug_assert_eq!(lo.len(), n);
+        debug_assert_eq!(hi.len(), n);
+        let mut row = EF::zero_vec(n);
+        if n > PAR_THRESHOLD {
+            row.par_iter_mut()
+                .zip(lo.par_iter().zip(hi.par_iter()))
+                .for_each(|(out, (&lo, &hi))| {
+                    let lo = EF::from(lo);
+                    *out = lo + first * (EF::from(hi) - lo);
+                });
+        } else {
+            for (out, (&lo, &hi)) in row.iter_mut().zip(lo.iter().zip(hi)) {
+                let lo = EF::from(lo);
+                *out = lo + first * (EF::from(hi) - lo);
+            }
+        }
+        rows.push(row);
+    }
+
+    for &challenge in &challenges[1..] {
+        rows = fold_table(rows, challenge);
+    }
+    debug_assert_eq!(rows.len(), 1);
+    rows.into_iter().next().unwrap()
 }
 
 /// Fold a `Vec<Vec<EF>>` table along its first axis at challenge `γ`,

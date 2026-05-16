@@ -1,20 +1,25 @@
 //! WHIR-facing opening layer for a WARP accumulator.
 //!
-//! This module is the WHIR-facing boundary for proving the final WARP
-//! accumulator checks with WHIR-compatible openings. It provides a
-//! precommitted opening proof for the RS/MLE accumulator opening
+//! This module is the WHIR-facing boundary for proving terminal accumulator
+//! checks with WHIR-compatible openings. It provides a precommitted opening
+//! proof for the RS/MLE accumulator opening
 //!
 //! ```text
 //!     f_hat(alpha) = mu
 //! ```
 //!
-//! and a sumcheck proof for the Boolean PESAT decider claim
-//! `Pb(beta, C^{-1}(f)) = eta`, using Plonky3's
-//! [`MultilinearPcs`](p3_commit::MultilinearPcs) abstraction. The important
-//! soundness condition is enforced explicitly throughout: PCS openings are
-//! checked against the accumulator's existing commitment `rt`. A WHIR wrapper
-//! that opens a fresh unrelated commitment would be unsound as a WARP
-//! finalizer.
+//! and a sumcheck proof for the Boolean PESAT claim over the systematic
+//! message subspace of that accumulator. The important binding condition is
+//! enforced explicitly throughout: PCS openings are checked against the
+//! accumulator's existing commitment `rt`. A WHIR wrapper that opens a fresh
+//! unrelated commitment would be unsound.
+//!
+//! With a generic multilinear PCS, these two opening checks are not by
+//! themselves a verifier-side proof of WARP's full terminal decider relation,
+//! because `f = C(w)` is an exact RS-codeword condition. The native prover API
+//! rejects a non-codeword terminal witness, but a remote verifier still needs
+//! the surrounding root exact-codeword bridge, or an equivalent PCS/backend
+//! guarantee, before treating this as a full `DACC` finalizer.
 
 use alloc::format;
 use alloc::vec;

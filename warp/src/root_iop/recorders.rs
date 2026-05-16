@@ -322,13 +322,14 @@ where
 
     pub(super) fn record_expected_claim(
         &self,
-        proof_claim_id: usize,
         oracle_id: usize,
         point: RootIopOpeningPoint<EF>,
         value: RootIopOpeningValue<F, EF>,
     ) {
-        self.expected_claims.borrow_mut().push(RootIopOpeningClaim {
-            claim_id: proof_claim_id,
+        let mut expected_claims = self.expected_claims.borrow_mut();
+        let claim_id = expected_claims.len();
+        expected_claims.push(RootIopOpeningClaim {
+            claim_id,
             oracle_id,
             point,
             value,
@@ -381,13 +382,14 @@ where
 
     pub(super) fn record_expected_claim(
         &self,
-        proof_claim_id: usize,
         oracle_id: usize,
         point: RootIopOpeningPoint<EF>,
         value: RootIopOpeningValue<F, EF>,
     ) {
-        self.expected_claims.borrow_mut().push(RootIopOpeningClaim {
-            claim_id: proof_claim_id,
+        let mut expected_claims = self.expected_claims.borrow_mut();
+        let claim_id = expected_claims.len();
+        expected_claims.push(RootIopOpeningClaim {
+            claim_id,
             oracle_id,
             point,
             value,

@@ -22,11 +22,14 @@ use crate::sumcheck::SumcheckProof;
 pub struct AccumulatorInstance<EF, Comm> {
     /// Merkle commitment of the merged codeword `f` over `EF`.
     pub rt: Comm,
-    /// §8.2 sumcheck challenges (length `log n`).
+    /// §8.2 sumcheck challenges (length `log_codeword_len = log_2 n`).
     pub alpha: Vec<EF>,
     /// `µ = f̂(α)`.
     pub mu: EF,
-    /// §6.3 final folded `β = B̂(γ)` (length `log M + κ`).
+    /// §6.3 final folded `β = B̂(γ)` (length
+    /// `log_constraints + explicit_len`). The first `log_constraints`
+    /// coordinates are PESAT bundling coordinates; the remaining
+    /// `explicit_len` coordinates are the explicit public instance.
     pub beta: Vec<EF>,
     /// `η = Pb(β, w)`.
     pub eta: EF,
@@ -55,13 +58,13 @@ pub struct Accumulator<EF, Comm, ProverData> {
 /// The naming mirrors the Construction 10.4 transcript:
 ///
 /// - `rt_0`: Merkle root of the stacked fresh codewords (length `ℓ_1`).
-/// - `mu_fresh`: `µ_i = f̂_i(0^{log n})` for the `ℓ_1` fresh instances.
+/// - `mu_fresh`: `µ_i = f̂_i(0^{log_codeword_len})` for the `ℓ_1` fresh instances.
 /// - `twin_constraint_sumcheck`: §6.3 sumcheck (length `log ℓ`, degree
-///   `1 + max{log n + 1, log M + d}`).
+///   `1 + max{log_codeword_len + 1, log_constraints + d}`).
 /// - `nu_0`: `f̂(ζ_0)` after the §6.3 fold, where `ζ_0 = Â(γ)`.
 /// - `eta`: `η = Pb(β, w)` after the §6.3 fold.
 /// - `nu_ood`: out-of-domain answers `f̂(ζ_k)` for `k ∈ [s]`.
-/// - `batching_sumcheck`: §8.2 sumcheck (length `log n`, degree 2).
+/// - `batching_sumcheck`: §8.2 sumcheck (length `log_codeword_len`, degree 2).
 /// - `mu_final`: final folded value `µ = f̂(α)`.
 /// - `fresh_shift_answers[k]`: the `ℓ_1` base-field values at shift index
 ///   `k` (one per stacked fresh codeword).
@@ -118,7 +121,7 @@ pub struct WarpProof<F, EF, Comm, Proof> {
                   Comm: Serialize + serde::de::DeserializeOwned,
                   Proof: Serialize + serde::de::DeserializeOwned")]
 pub struct WarpProofCommitted<F, EF, Comm, Proof> {
-    /// `µ_i = f̂_i(0^{log n})` for the `ℓ_1` fresh instances.
+    /// `µ_i = f̂_i(0^{log_codeword_len})` for the `ℓ_1` fresh instances.
     pub mu_fresh: Vec<EF>,
     pub twin_constraint_sumcheck: SumcheckProof<EF>,
     pub nu_0: EF,
@@ -159,7 +162,7 @@ pub struct WarpProofCommitted<F, EF, Comm, Proof> {
                   FreshProof: Serialize + serde::de::DeserializeOwned,
                   AccProof: Serialize + serde::de::DeserializeOwned")]
 pub struct WarpProofExternal<F, EF, AccComm, FreshProof, AccProof> {
-    /// `µ_i = f̂_i(0^{log n})` for the `ℓ_1` fresh instances.
+    /// `µ_i = f̂_i(0^{log_codeword_len})` for the `ℓ_1` fresh instances.
     pub mu_fresh: Vec<EF>,
     pub twin_constraint_sumcheck: SumcheckProof<EF>,
     pub nu_0: EF,
@@ -197,7 +200,7 @@ pub struct WarpProofExternal<F, EF, AccComm, FreshProof, AccProof> {
                   FreshProof: Serialize + serde::de::DeserializeOwned,
                   AccProof: Serialize + serde::de::DeserializeOwned")]
 pub struct WarpProofExternalBatched<F, EF, AccComm, FreshProof, AccProof> {
-    /// `µ_i = f̂_i(0^{log n})` for the `ℓ_1` fresh instances.
+    /// `µ_i = f̂_i(0^{log_codeword_len})` for the `ℓ_1` fresh instances.
     pub mu_fresh: Vec<EF>,
     pub twin_constraint_sumcheck: SumcheckProof<EF>,
     pub nu_0: EF,

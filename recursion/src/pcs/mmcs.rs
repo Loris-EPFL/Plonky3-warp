@@ -1245,7 +1245,11 @@ mod test {
             let proof = prover
                 .prove_all_tables(&traces, &circuit_prover_data)
                 .expect("Failed to prove all tables");
-            assert!(prover.verify_all_tables(&proof).is_err())
+            assert!(
+                prover
+                    .verify_all_tables(&proof, &proof.self_describing_verifier_data())
+                    .is_err()
+            )
         }
     }
 

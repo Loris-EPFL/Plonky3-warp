@@ -120,7 +120,7 @@ where
         }
         let log_l = l.trailing_zeros() as usize;
         let shape = self.pesat.shape();
-        let log_m = shape.log_constraints;
+        let log_constraints = shape.log_constraints;
         let log_n = self.code.log_codeword_len();
         let log_h = log_n - self.code.log_inv_rate();
         let beta_len = shape.beta_len();
@@ -207,10 +207,11 @@ where
             challenger.observe_algebra_element(inst.eta);
         }
 
-        // ---------- 3. Re-sample fresh τ_i and reconstruct (α_i, β_i, η_i). ----------
+        // ---------- 3. Re-sample fresh PESAT bundling coordinates and
+        //              reconstruct (α_i, β_i, η_i). ----------
         let fresh_taus: Vec<Vec<EF>> = (0..l1)
             .map(|_| {
-                (0..log_m)
+                (0..log_constraints)
                     .map(|_| challenger.sample_algebra_element())
                     .collect()
             })
@@ -227,7 +228,7 @@ where
             all_etas.push(inst.eta);
         }
 
-        // ---------- 4. Sample (ω, τ); compute initial sum σ⁽¹⁾. ----------
+        // ---------- 4. Sample (ω, τ_selector); compute initial sum σ⁽¹⁾. ----------
         let omega: EF = challenger.sample_algebra_element();
         let tau: Vec<EF> = (0..log_l)
             .map(|_| challenger.sample_algebra_element())
@@ -238,7 +239,7 @@ where
             .sum();
 
         // ---------- 5. Verify §6.3 sumcheck. ----------
-        let d1 = 1 + (log_n + 1).max(log_m + shape.max_degree);
+        let d1 = 1 + (log_n + 1).max(log_constraints + shape.max_degree);
         let (gamma_pt, twin_final_claim) = verify_sumcheck::<F, EF, _>(
             &proof.twin_constraint_sumcheck,
             challenger,
@@ -255,7 +256,7 @@ where
         challenger.observe_algebra_element(proof.eta);
 
         // ---------- 7. Twin-constraint final-claim oracle check:
-        //              h_last(γ_last) == eq(τ, γ) · (ν_0 + ω · η). ----------
+        //              h_last(γ_last) == eq(τ_selector, γ) · (ν_0 + ω · η). ----------
         let eq_tau_at_gamma: EF = Point::eval_eq(&tau, &gamma);
         let expected_twin_final = eq_tau_at_gamma * (proof.nu_0 + omega * proof.eta);
         if expected_twin_final != twin_final_claim {
@@ -535,7 +536,7 @@ where
         }
         let log_l = l.trailing_zeros() as usize;
         let shape = self.pesat.shape();
-        let log_m = shape.log_constraints;
+        let log_constraints = shape.log_constraints;
         let log_n = self.code.log_codeword_len();
         let log_h = log_n - self.code.log_inv_rate();
         let beta_len = shape.beta_len();
@@ -624,10 +625,11 @@ where
             challenger.observe_algebra_element(inst.eta);
         }
 
-        // ---------- 3. Re-sample fresh τ_i and reconstruct (α_i, β_i, η_i). ----------
+        // ---------- 3. Re-sample fresh PESAT bundling coordinates and
+        //              reconstruct (α_i, β_i, η_i). ----------
         let fresh_taus: Vec<Vec<EF>> = (0..l1)
             .map(|_| {
-                (0..log_m)
+                (0..log_constraints)
                     .map(|_| challenger.sample_algebra_element())
                     .collect()
             })
@@ -644,7 +646,7 @@ where
             all_etas.push(inst.eta);
         }
 
-        // ---------- 4. Sample (ω, τ); compute σ⁽¹⁾. ----------
+        // ---------- 4. Sample (ω, τ_selector); compute σ⁽¹⁾. ----------
         let omega: EF = challenger.sample_algebra_element();
         let tau: Vec<EF> = (0..log_l)
             .map(|_| challenger.sample_algebra_element())
@@ -655,7 +657,7 @@ where
             .sum();
 
         // ---------- 5. Verify §6.3 sumcheck. ----------
-        let d1 = 1 + (log_n + 1).max(log_m + shape.max_degree);
+        let d1 = 1 + (log_n + 1).max(log_constraints + shape.max_degree);
         let (gamma_pt, twin_final_claim) = verify_sumcheck::<F, EF, _>(
             &proof.twin_constraint_sumcheck,
             challenger,
@@ -871,7 +873,7 @@ where
         }
         let log_l = l.trailing_zeros() as usize;
         let shape = self.pesat.shape();
-        let log_m = shape.log_constraints;
+        let log_constraints = shape.log_constraints;
         let log_n = self.code.log_codeword_len();
         let log_h = log_n - self.code.log_inv_rate();
         let beta_len = shape.beta_len();
@@ -909,6 +911,16 @@ where
                 field: "fresh batch proof count",
             });
         }
+        for opening_proof in &proof.fresh_opening_proofs {
+            if let Some(got) = fresh_verifier.batch_opening_len(opening_proof) {
+                if got != self.params.num_shift_queries {
+                    return Err(VerifierError::ShiftQueryCount {
+                        expected: self.params.num_shift_queries,
+                        got,
+                    });
+                }
+            }
+        }
         for answers in &proof.fresh_shift_answers {
             if answers.len() != l1 {
                 return Err(VerifierError::AccumulatorMismatch {
@@ -920,6 +932,16 @@ where
             return Err(VerifierError::AccumulatorMismatch {
                 field: "acc shift answers length",
             });
+        }
+        for opening_proof in &proof.acc_merkle_proofs {
+            if let Some(got) = acc_backend.batch_opening_len(opening_proof) {
+                if got != self.params.num_shift_queries {
+                    return Err(VerifierError::ShiftQueryCount {
+                        expected: self.params.num_shift_queries,
+                        got,
+                    });
+                }
+            }
         }
         for answers in &proof.acc_shift_answers {
             if answers.len() != self.params.num_shift_queries {
@@ -971,7 +993,7 @@ where
 
         let fresh_taus: Vec<Vec<EF>> = (0..l1)
             .map(|_| {
-                (0..log_m)
+                (0..log_constraints)
                     .map(|_| challenger.sample_algebra_element())
                     .collect()
             })
@@ -997,7 +1019,7 @@ where
             .map(|i| tau_eq.as_slice()[i] * (all_mus[i] + omega * all_etas[i]))
             .sum();
 
-        let d1 = 1 + (log_n + 1).max(log_m + shape.max_degree);
+        let d1 = 1 + (log_n + 1).max(log_constraints + shape.max_degree);
         let (gamma_pt, twin_final_claim) = verify_sumcheck::<F, EF, _>(
             &proof.twin_constraint_sumcheck,
             challenger,
@@ -1057,18 +1079,16 @@ where
         let shift_indices =
             sample_indices::<F, _>(challenger, log_n, self.params.num_shift_queries);
 
+        let mut fresh_values = Vec::with_capacity(self.params.num_shift_queries);
         for (i, commitment_i) in fresh_commitments.iter().enumerate() {
-            let values = proof
-                .fresh_shift_answers
-                .iter()
-                .map(|answers| answers[i])
-                .collect::<Vec<_>>();
+            fresh_values.clear();
+            fresh_values.extend(proof.fresh_shift_answers.iter().map(|answers| answers[i]));
             fresh_verifier
                 .verify_batch_opening(
                     commitment_i,
                     log_n,
                     &shift_indices,
-                    &values,
+                    &fresh_values,
                     &proof.fresh_opening_proofs[i],
                 )
                 .map_err(|err| VerifierError::MerkleProof {
@@ -1077,17 +1097,16 @@ where
                 })?;
         }
 
+        let mut acc_values = Vec::with_capacity(self.params.num_shift_queries);
         for (j, inst) in prior_instances.iter().enumerate() {
-            let values = proof.acc_shift_answers[j]
-                .iter()
-                .map(|leaf| leaf[0])
-                .collect::<Vec<_>>();
+            acc_values.clear();
+            acc_values.extend(proof.acc_shift_answers[j].iter().map(|leaf| leaf[0]));
             acc_backend
                 .verify_batch_opening(
                     &inst.rt,
                     log_n,
                     &shift_indices,
-                    &values,
+                    &acc_values,
                     &proof.acc_merkle_proofs[j],
                 )
                 .map_err(|err| VerifierError::MerkleProof {

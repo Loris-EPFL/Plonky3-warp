@@ -21,6 +21,19 @@ use serde::de::DeserializeOwned;
 
 use super::prover::CommittedCodeword;
 
+/// Error returned by the default Plonky3 opening adapters.
+#[derive(Clone, Debug)]
+pub enum OpeningVerificationError<E> {
+    /// The caller supplied mismatched batch vector lengths.
+    BatchShape {
+        indices: usize,
+        values: usize,
+        proofs: usize,
+    },
+    /// The underlying PCS rejected an opening.
+    Backend(E),
+}
+
 /// Verifier adapter for fresh inputs committed with a Plonky3 [`Mmcs`].
 #[derive(Clone, Copy, Debug)]
 pub struct MmcsExternalOpeningVerifier<'a, MT> {
@@ -153,6 +166,18 @@ where
     /// Batched opening proof produced by the external PCS.
     type BatchProof: Clone + Serialize + DeserializeOwned;
 
+    /// Return the number of point openings represented by this proof when
+    /// that count is visible from the proof shape.
+    ///
+    /// Some PCS backends use a single aggregate proof for all indices, so the
+    /// default returns `None`. Backends represented as one proof per index
+    /// should return `Some(count)` so verifiers can reject malformed serialized
+    /// proofs before entering backend code.
+    fn batch_opening_len(&self, proof: &Self::BatchProof) -> Option<usize> {
+        let _ = proof;
+        None
+    }
+
     /// Verify that `values[i]` is the flattened-codeword entry at `indices[i]`.
     fn verify_batch_opening(
         &self,
@@ -237,6 +262,18 @@ where
     /// Batched opening proof for one accumulator codeword at many indices.
     type BatchProof: Clone + Serialize + DeserializeOwned;
 
+    /// Return the number of point openings represented by this proof when
+    /// that count is visible from the proof shape.
+    ///
+    /// Some PCS backends use a single aggregate proof for all indices, so the
+    /// default returns `None`. Backends represented as one proof per index
+    /// should return `Some(count)` so verifiers can reject malformed serialized
+    /// proofs before entering backend code.
+    fn batch_opening_len(&self, proof: &Self::BatchProof) -> Option<usize> {
+        let _ = proof;
+        None
+    }
+
     /// Open the committed accumulator codeword at all `indices`.
     fn open_batch(
         &self,
@@ -286,7 +323,7 @@ where
     type Commitment = MT::Commitment;
     type ProverData = <ExtensionMmcs<F, EF, MT> as Mmcs<EF>>::ProverData<RowMajorMatrix<EF>>;
     type Proof = MT::Proof;
-    type Error = MT::Error;
+    type Error = OpeningVerificationError<MT::Error>;
 
     fn commit(
         &self,
@@ -328,6 +365,7 @@ where
             index,
             BatchOpeningRef::new(&opened, proof),
         )
+        .map_err(OpeningVerificationError::Backend)
     }
 }
 
@@ -341,6 +379,10 @@ where
     Challenger: FieldChallenger<F> + CanObserve<MT::Commitment>,
 {
     type BatchProof = Vec<MT::Proof>;
+
+    fn batch_opening_len(&self, proof: &Self::BatchProof) -> Option<usize> {
+        Some(proof.len())
+    }
 
     fn open_batch(
         &self,
@@ -369,8 +411,13 @@ where
         values: &[EF],
         proof: &Self::BatchProof,
     ) -> Result<(), Self::Error> {
-        assert_eq!(indices.len(), values.len());
-        assert_eq!(indices.len(), proof.len());
+        if indices.len() != values.len() || indices.len() != proof.len() {
+            return Err(OpeningVerificationError::BatchShape {
+                indices: indices.len(),
+                values: values.len(),
+                proofs: proof.len(),
+            });
+        }
         for ((&index, &value), proof) in indices.iter().zip(values.iter()).zip(proof.iter()) {
             <Self as AccumulatorCommitmentBackend<F, EF, Challenger>>::verify_opening(
                 self,
@@ -451,7 +498,7 @@ where
 {
     type Commitment = MT::Commitment;
     type Proof = MT::Proof;
-    type Error = MT::Error;
+    type Error = OpeningVerificationError<MT::Error>;
 
     fn observe_commitment(&self, challenger: &mut Challenger, commitment: &Self::Commitment) {
         challenger.observe(commitment.clone());
@@ -470,12 +517,14 @@ where
             width: 1,
         }];
         let opened = vec![vec![value]];
-        self.mmcs.verify_batch(
-            commitment,
-            &dims,
-            index,
-            BatchOpeningRef::new(&opened, proof),
-        )
+        self.mmcs
+            .verify_batch(
+                commitment,
+                &dims,
+                index,
+                BatchOpeningRef::new(&opened, proof),
+            )
+            .map_err(OpeningVerificationError::Backend)
     }
 }
 
@@ -489,6 +538,10 @@ where
 {
     type BatchProof = Vec<MT::Proof>;
 
+    fn batch_opening_len(&self, proof: &Self::BatchProof) -> Option<usize> {
+        Some(proof.len())
+    }
+
     fn verify_batch_opening(
         &self,
         commitment: &Self::Commitment,
@@ -497,8 +550,13 @@ where
         values: &[F],
         proof: &Self::BatchProof,
     ) -> Result<(), Self::Error> {
-        assert_eq!(indices.len(), values.len());
-        assert_eq!(indices.len(), proof.len());
+        if indices.len() != values.len() || indices.len() != proof.len() {
+            return Err(OpeningVerificationError::BatchShape {
+                indices: indices.len(),
+                values: values.len(),
+                proofs: proof.len(),
+            });
+        }
         for ((&index, &value), proof) in indices.iter().zip(values.iter()).zip(proof.iter()) {
             <Self as ExternalCodewordOpeningVerifier<F, Challenger>>::verify_opening(
                 self,

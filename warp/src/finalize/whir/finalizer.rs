@@ -1,10 +1,14 @@
-//! WHIR-facing finalizer protocols for WARP decider checks.
+//! WHIR-facing finalizer protocols for WARP terminal checks.
 //!
-//! This module proves the two final WARP conditions against one accumulator
-//! commitment: the accumulator opening `f_hat(alpha) = mu` and the Boolean
-//! PESAT decider claim `Pb(beta, C^{-1}(f)) = eta`. The Boolean path relies on
-//! systematic RS encoding, so the witness `C^{-1}(f)` is obtained from the
-//! message subspace of the same committed RS codeword used by WHIR.
+//! This module proves the terminal accumulator opening `f_hat(alpha) = mu` and
+//! the Boolean PESAT claim over the systematic message subspace of the same
+//! accumulator commitment. With a generic multilinear PCS, these checks are
+//! not a standalone proof of the full WARP decider relation: verifier-side
+//! codeword consistency `f = C(w)` must come from the surrounding root
+//! exact-codeword bridge or from a PCS/backend that explicitly enforces the RS
+//! code relation. The prover API still fails closed by checking that its local
+//! terminal codeword is exactly the RS encoding of the systematic message it
+//! uses in the Boolean sumcheck.
 
 use super::*;
 
@@ -54,6 +58,10 @@ where
     Dft: TwoAdicSubgroupDft<F>,
 {
     /// Prove `sum_i eq(beta, i) * w_i * (w_i - 1) = eta`.
+    ///
+    /// The resulting sumcheck has degree three per round for this direct
+    /// Boolean relation. That degree bound is specific to this finalizer; it
+    /// is not a generic PESAT or WARP theorem.
     pub fn prove<ProverData>(
         &self,
         instance: &AccumulatorInstance<EF, Pcs::Commitment>,
@@ -64,6 +72,9 @@ where
             return Err(FinalizerError::Decider(DeciderError::EncodingMismatch));
         }
         let committed_witness = self.systematic_witness_from_codeword(&witness.f)?;
+        if self.code.encode_algebra::<EF>(&committed_witness) != witness.f {
+            return Err(FinalizerError::Decider(DeciderError::EncodingMismatch));
+        }
 
         let mut challenger = self.challenger_seed.clone();
         self.observe_statement(instance, &mut challenger);
@@ -250,7 +261,12 @@ where
     }
 }
 
-/// Composed WHIR-native finalizer for direct Boolean PESAT.
+/// Composed WHIR-native terminal checker for direct Boolean PESAT.
+///
+/// The proof verifies the accumulator opening and the direct Boolean PESAT
+/// equation against the same commitment. Full WARP decider soundness also
+/// needs verifier-side codeword consistency `f = C(w)`, supplied by the
+/// surrounding root exact-codeword bridge or an equivalent backend guarantee.
 pub struct WhirBooleanWarpFinalizerProtocol<'a, F, EF, Pcs, Challenger, Dft>
 where
     F: TwoAdicField + PrimeCharacteristicRing,

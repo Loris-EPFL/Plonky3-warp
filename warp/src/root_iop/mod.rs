@@ -9,8 +9,9 @@
 //!
 //! The recorder in this module is deliberately not the final succinct proof.
 //! It is the boundary between the WARP root IOP and a WHIR-style compiler as
-//! in WHIR Construction 7.4: first record the linear IOP transcript, then prove
-//! the recorded oracle claims with one batched proximity layer.
+//! in the precommitted specialization of WHIR Construction 7.4: first record
+//! the linear IOP transcript, then prove the recorded oracle claims with one
+//! WHIR proximity layer over the already-bound roots.
 
 use alloc::vec::Vec;
 
@@ -60,17 +61,12 @@ where
                 oracle_id: committed.commitment().oracle_id,
                 index,
             })?;
-        let claim_id = self.state.borrow_mut().push_claim(
+        self.state.borrow_mut().push_claim(
             committed.commitment().oracle_id,
             RootIopOpeningPoint::RsCodewordIndex(index),
             RootIopOpeningValue::Base(value),
         );
-        Ok((
-            value,
-            RootIopOpeningProof {
-                claim_ids: alloc::vec![claim_id],
-            },
-        ))
+        Ok((value, RootIopOpeningProof::new(1)))
     }
 }
 
@@ -88,7 +84,6 @@ where
         indices: &[usize],
     ) -> Result<(Vec<F>, Self::BatchProof), Self::Error> {
         let mut values = Vec::with_capacity(indices.len());
-        let mut claim_ids = Vec::with_capacity(indices.len());
         for &index in indices {
             let value = *committed
                 .codeword()
@@ -97,15 +92,14 @@ where
                     oracle_id: committed.commitment().oracle_id,
                     index,
                 })?;
-            let claim_id = self.state.borrow_mut().push_claim(
+            self.state.borrow_mut().push_claim(
                 committed.commitment().oracle_id,
                 RootIopOpeningPoint::RsCodewordIndex(index),
                 RootIopOpeningValue::Base(value),
             );
             values.push(value);
-            claim_ids.push(claim_id);
         }
-        Ok((values, RootIopOpeningProof { claim_ids }))
+        Ok((values, RootIopOpeningProof::new(indices.len())))
     }
 }
 
@@ -134,15 +128,10 @@ where
         if commitment.field != RootIopOracleField::Base || commitment.log_len != log_codeword_len {
             return Err(RootIopError::ShapeMismatch);
         }
-        let claim_id = *proof
-            .claim_ids
-            .first()
-            .ok_or(RootIopError::OpeningArityMismatch)?;
-        if proof.claim_ids.len() != 1 {
+        if proof.len() != 1 {
             return Err(RootIopError::OpeningArityMismatch);
         }
         self.record_expected_claim(
-            claim_id,
             commitment.oracle_id,
             RootIopOpeningPoint::RsCodewordIndex(index),
             RootIopOpeningValue::Base(value),
@@ -160,6 +149,10 @@ where
 {
     type BatchProof = RootIopOpeningProof;
 
+    fn batch_opening_len(&self, proof: &Self::BatchProof) -> Option<usize> {
+        Some(proof.len())
+    }
+
     fn verify_batch_opening(
         &self,
         commitment: &Self::Commitment,
@@ -171,16 +164,11 @@ where
         if commitment.field != RootIopOracleField::Base || commitment.log_len != log_codeword_len {
             return Err(RootIopError::ShapeMismatch);
         }
-        if indices.len() != values.len() || indices.len() != proof.claim_ids.len() {
+        if indices.len() != values.len() || indices.len() != proof.len() {
             return Err(RootIopError::OpeningArityMismatch);
         }
-        for ((&index, &value), &claim_id) in indices
-            .iter()
-            .zip(values.iter())
-            .zip(proof.claim_ids.iter())
-        {
+        for (&index, &value) in indices.iter().zip(values.iter()) {
             self.record_expected_claim(
-                claim_id,
                 commitment.oracle_id,
                 RootIopOpeningPoint::RsCodewordIndex(index),
                 RootIopOpeningValue::Base(value),
@@ -233,17 +221,12 @@ where
                 oracle_id: prover_data.commitment.oracle_id,
                 index,
             })?;
-        let claim_id = self.state.borrow_mut().push_claim(
+        self.state.borrow_mut().push_claim(
             prover_data.commitment.oracle_id,
             RootIopOpeningPoint::RsCodewordIndex(index),
             RootIopOpeningValue::Extension(value),
         );
-        Ok((
-            value,
-            RootIopOpeningProof {
-                claim_ids: alloc::vec![claim_id],
-            },
-        ))
+        Ok((value, RootIopOpeningProof::new(1)))
     }
 
     fn observe_commitment(&self, challenger: &mut Challenger, commitment: &Self::Commitment) {
@@ -276,7 +259,6 @@ where
         indices: &[usize],
     ) -> Result<(Vec<EF>, Self::BatchProof), Self::Error> {
         let mut values = Vec::with_capacity(indices.len());
-        let mut claim_ids = Vec::with_capacity(indices.len());
         for &index in indices {
             let value = *prover_data
                 .codeword
@@ -285,15 +267,14 @@ where
                     oracle_id: prover_data.commitment.oracle_id,
                     index,
                 })?;
-            let claim_id = self.state.borrow_mut().push_claim(
+            self.state.borrow_mut().push_claim(
                 prover_data.commitment.oracle_id,
                 RootIopOpeningPoint::RsCodewordIndex(index),
                 RootIopOpeningValue::Extension(value),
             );
             values.push(value);
-            claim_ids.push(claim_id);
         }
-        Ok((values, RootIopOpeningProof { claim_ids }))
+        Ok((values, RootIopOpeningProof::new(indices.len())))
     }
 
     fn verify_batch_opening(
@@ -351,15 +332,10 @@ where
         {
             return Err(RootIopError::ShapeMismatch);
         }
-        let claim_id = *proof
-            .claim_ids
-            .first()
-            .ok_or(RootIopError::OpeningArityMismatch)?;
-        if proof.claim_ids.len() != 1 {
+        if proof.len() != 1 {
             return Err(RootIopError::OpeningArityMismatch);
         }
         self.record_expected_claim(
-            claim_id,
             commitment.oracle_id,
             RootIopOpeningPoint::RsCodewordIndex(index),
             RootIopOpeningValue::Extension(value),
@@ -375,6 +351,10 @@ where
     Challenger: FieldChallenger<F>,
 {
     type BatchProof = RootIopOpeningProof;
+
+    fn batch_opening_len(&self, proof: &Self::BatchProof) -> Option<usize> {
+        Some(proof.len())
+    }
 
     fn open_batch(
         &self,
@@ -397,16 +377,11 @@ where
         {
             return Err(RootIopError::ShapeMismatch);
         }
-        if indices.len() != values.len() || indices.len() != proof.claim_ids.len() {
+        if indices.len() != values.len() || indices.len() != proof.len() {
             return Err(RootIopError::OpeningArityMismatch);
         }
-        for ((&index, &value), &claim_id) in indices
-            .iter()
-            .zip(values.iter())
-            .zip(proof.claim_ids.iter())
-        {
+        for (&index, &value) in indices.iter().zip(values.iter()) {
             self.record_expected_claim(
-                claim_id,
                 commitment.oracle_id,
                 RootIopOpeningPoint::RsCodewordIndex(index),
                 RootIopOpeningValue::Extension(value),
@@ -439,18 +414,19 @@ where
         }
         let poly = Poly::<EF>::new(prover_data.codeword.clone());
         let mut values = Vec::with_capacity(opening_points[0].len());
-        let mut claim_ids = Vec::with_capacity(opening_points[0].len());
         for point in &opening_points[0] {
             let value = poly.eval_ext::<F>(point);
-            let claim_id = self.state.borrow_mut().push_claim(
+            self.state.borrow_mut().push_claim(
                 prover_data.commitment.oracle_id,
                 RootIopOpeningPoint::Mle(point.as_slice().to_vec()),
                 RootIopOpeningValue::Extension(value),
             );
             values.push(value);
-            claim_ids.push(claim_id);
         }
-        Ok((alloc::vec![values], RootIopOpeningProof { claim_ids }))
+        Ok((
+            alloc::vec![values],
+            RootIopOpeningProof::new(opening_points[0].len()),
+        ))
     }
 
     fn verify_points(
@@ -493,12 +469,11 @@ where
         if commitment.field != RootIopOracleField::Extension {
             return Err(RootIopError::ShapeMismatch);
         }
-        if opening_claims.len() != 1 || opening_claims[0].len() != proof.claim_ids.len() {
+        if opening_claims.len() != 1 || opening_claims[0].len() != proof.len() {
             return Err(RootIopError::OpeningArityMismatch);
         }
-        for ((point, value), &claim_id) in opening_claims[0].iter().zip(proof.claim_ids.iter()) {
+        for (point, value) in &opening_claims[0] {
             self.record_expected_claim(
-                claim_id,
                 commitment.oracle_id,
                 RootIopOpeningPoint::Mle(point.as_slice().to_vec()),
                 RootIopOpeningValue::Extension(*value),
@@ -527,17 +502,12 @@ where
                 oracle_id: commitment.oracle_id,
                 index,
             })?;
-        let claim_id = self.state.borrow_mut().push_claim(
+        self.state.borrow_mut().push_claim(
             commitment.oracle_id,
             RootIopOpeningPoint::RsCodewordIndex(index),
             RootIopOpeningValue::Base(value),
         );
-        Ok((
-            value,
-            RootIopOpeningProof {
-                claim_ids: alloc::vec![claim_id],
-            },
-        ))
+        Ok((value, RootIopOpeningProof::new(1)))
     }
 }
 
@@ -557,7 +527,6 @@ where
     ) -> Result<(Vec<F>, Self::BatchProof), Self::Error> {
         let commitment = committed.commitment();
         let mut values = Vec::with_capacity(indices.len());
-        let mut claim_ids = Vec::with_capacity(indices.len());
         for &index in indices {
             let value = *committed
                 .codeword()
@@ -566,15 +535,14 @@ where
                     oracle_id: commitment.oracle_id,
                     index,
                 })?;
-            let claim_id = self.state.borrow_mut().push_claim(
+            self.state.borrow_mut().push_claim(
                 commitment.oracle_id,
                 RootIopOpeningPoint::RsCodewordIndex(index),
                 RootIopOpeningValue::Base(value),
             );
             values.push(value);
-            claim_ids.push(claim_id);
         }
-        Ok((values, RootIopOpeningProof { claim_ids }))
+        Ok((values, RootIopOpeningProof::new(indices.len())))
     }
 }
 
@@ -606,15 +574,10 @@ where
         if commitment.field != RootIopOracleField::Base || commitment.log_len != log_codeword_len {
             return Err(RootIopError::ShapeMismatch);
         }
-        let claim_id = *proof
-            .claim_ids
-            .first()
-            .ok_or(RootIopError::OpeningArityMismatch)?;
-        if proof.claim_ids.len() != 1 {
+        if proof.len() != 1 {
             return Err(RootIopError::OpeningArityMismatch);
         }
         self.record_expected_claim(
-            claim_id,
             commitment.oracle_id,
             RootIopOpeningPoint::RsCodewordIndex(index),
             RootIopOpeningValue::Base(value),
@@ -633,6 +596,10 @@ where
 {
     type BatchProof = RootIopOpeningProof;
 
+    fn batch_opening_len(&self, proof: &Self::BatchProof) -> Option<usize> {
+        Some(proof.len())
+    }
+
     fn verify_batch_opening(
         &self,
         commitment: &Self::Commitment,
@@ -644,16 +611,11 @@ where
         if commitment.field != RootIopOracleField::Base || commitment.log_len != log_codeword_len {
             return Err(RootIopError::ShapeMismatch);
         }
-        if indices.len() != values.len() || indices.len() != proof.claim_ids.len() {
+        if indices.len() != values.len() || indices.len() != proof.len() {
             return Err(RootIopError::OpeningArityMismatch);
         }
-        for ((&index, &value), &claim_id) in indices
-            .iter()
-            .zip(values.iter())
-            .zip(proof.claim_ids.iter())
-        {
+        for (&index, &value) in indices.iter().zip(values.iter()) {
             self.record_expected_claim(
-                claim_id,
                 commitment.oracle_id,
                 RootIopOpeningPoint::RsCodewordIndex(index),
                 RootIopOpeningValue::Base(value),
@@ -712,17 +674,12 @@ where
                 oracle_id: prover_data.commitment.oracle_id,
                 index,
             })?;
-        let claim_id = self.state.borrow_mut().push_claim(
+        self.state.borrow_mut().push_claim(
             prover_data.commitment.oracle_id,
             RootIopOpeningPoint::RsCodewordIndex(index),
             RootIopOpeningValue::Extension(value),
         );
-        Ok((
-            value,
-            RootIopOpeningProof {
-                claim_ids: alloc::vec![claim_id],
-            },
-        ))
+        Ok((value, RootIopOpeningProof::new(1)))
     }
 
     fn observe_commitment(&self, challenger: &mut Challenger, commitment: &Self::Commitment) {
@@ -757,7 +714,6 @@ where
         indices: &[usize],
     ) -> Result<(Vec<EF>, Self::BatchProof), Self::Error> {
         let mut values = Vec::with_capacity(indices.len());
-        let mut claim_ids = Vec::with_capacity(indices.len());
         for &index in indices {
             let value = *prover_data
                 .codeword
@@ -766,15 +722,14 @@ where
                     oracle_id: prover_data.commitment.oracle_id,
                     index,
                 })?;
-            let claim_id = self.state.borrow_mut().push_claim(
+            self.state.borrow_mut().push_claim(
                 prover_data.commitment.oracle_id,
                 RootIopOpeningPoint::RsCodewordIndex(index),
                 RootIopOpeningValue::Extension(value),
             );
             values.push(value);
-            claim_ids.push(claim_id);
         }
-        Ok((values, RootIopOpeningProof { claim_ids }))
+        Ok((values, RootIopOpeningProof::new(indices.len())))
     }
 
     fn verify_batch_opening(
@@ -835,15 +790,10 @@ where
         {
             return Err(RootIopError::ShapeMismatch);
         }
-        let claim_id = *proof
-            .claim_ids
-            .first()
-            .ok_or(RootIopError::OpeningArityMismatch)?;
-        if proof.claim_ids.len() != 1 {
+        if proof.len() != 1 {
             return Err(RootIopError::OpeningArityMismatch);
         }
         self.record_expected_claim(
-            claim_id,
             commitment.oracle_id,
             RootIopOpeningPoint::RsCodewordIndex(index),
             RootIopOpeningValue::Extension(value),
@@ -861,6 +811,10 @@ where
     Challenger: FieldChallenger<F> + CanObserve<Comm>,
 {
     type BatchProof = RootIopOpeningProof;
+
+    fn batch_opening_len(&self, proof: &Self::BatchProof) -> Option<usize> {
+        Some(proof.len())
+    }
 
     fn open_batch(
         &self,
@@ -883,16 +837,11 @@ where
         {
             return Err(RootIopError::ShapeMismatch);
         }
-        if indices.len() != values.len() || indices.len() != proof.claim_ids.len() {
+        if indices.len() != values.len() || indices.len() != proof.len() {
             return Err(RootIopError::OpeningArityMismatch);
         }
-        for ((&index, &value), &claim_id) in indices
-            .iter()
-            .zip(values.iter())
-            .zip(proof.claim_ids.iter())
-        {
+        for (&index, &value) in indices.iter().zip(values.iter()) {
             self.record_expected_claim(
-                claim_id,
                 commitment.oracle_id,
                 RootIopOpeningPoint::RsCodewordIndex(index),
                 RootIopOpeningValue::Extension(value),
@@ -927,18 +876,19 @@ where
         }
         let poly = Poly::<EF>::new(prover_data.codeword.clone());
         let mut values = Vec::with_capacity(opening_points[0].len());
-        let mut claim_ids = Vec::with_capacity(opening_points[0].len());
         for point in &opening_points[0] {
             let value = poly.eval_ext::<F>(point);
-            let claim_id = self.state.borrow_mut().push_claim(
+            self.state.borrow_mut().push_claim(
                 prover_data.commitment.oracle_id,
                 RootIopOpeningPoint::Mle(point.as_slice().to_vec()),
                 RootIopOpeningValue::Extension(value),
             );
             values.push(value);
-            claim_ids.push(claim_id);
         }
-        Ok((alloc::vec![values], RootIopOpeningProof { claim_ids }))
+        Ok((
+            alloc::vec![values],
+            RootIopOpeningProof::new(opening_points[0].len()),
+        ))
     }
 
     fn verify_points(
@@ -983,12 +933,11 @@ where
         if commitment.field != RootIopOracleField::Extension {
             return Err(RootIopError::ShapeMismatch);
         }
-        if opening_claims.len() != 1 || opening_claims[0].len() != proof.claim_ids.len() {
+        if opening_claims.len() != 1 || opening_claims[0].len() != proof.len() {
             return Err(RootIopError::OpeningArityMismatch);
         }
-        for ((point, value), &claim_id) in opening_claims[0].iter().zip(proof.claim_ids.iter()) {
+        for (point, value) in &opening_claims[0] {
             self.record_expected_claim(
-                claim_id,
                 commitment.oracle_id,
                 RootIopOpeningPoint::Mle(point.as_slice().to_vec()),
                 RootIopOpeningValue::Extension(*value),

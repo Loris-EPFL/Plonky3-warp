@@ -17,7 +17,7 @@ use std::vec::Vec;
 
 use p3_baby_bear::{BabyBear, Poseidon2BabyBear, default_babybear_poseidon2_16};
 use p3_challenger::{CanObserve, DuplexChallenger};
-use p3_commit::Mmcs;
+use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_dft::Radix2DFTSmallBatch;
 use p3_field::extension::BinomialExtensionField;
 use p3_field::{Field, PrimeCharacteristicRing};
@@ -1119,4 +1119,111 @@ fn prove_with_committed_two_step_accumulation_accepts() {
     decider
         .decide(&acc2.instance, &acc2.witness)
         .expect("step-2 decide");
+}
+
+#[test]
+fn malformed_batched_opening_proofs_are_rejected_without_panic() {
+    let (mmcs, base_challenger, pesat, code) = make_components();
+    let params = make_params();
+    let prover = WarpProver::new(&mmcs, &code, &pesat, params);
+    let verifier = WarpVerifier::new(&mmcs, &code, &pesat, params);
+    let fresh_verifier = MmcsExternalOpeningVerifier::new(&mmcs);
+    let acc_backend = ExtensionMmcs::<F, EF, MyMmcs>::new(mmcs.clone());
+
+    let witnesses1: Vec<Vec<F>> = (0..NUM_FRESH)
+        .map(|i| make_satisfying_witness(3100 + i as u64))
+        .collect();
+    let committed1: Vec<CommittedCodeword<F, MyMmcs>> = witnesses1
+        .into_iter()
+        .map(|w| prover.commit_witness(w))
+        .collect();
+    let commits1: Vec<MyComm> = committed1.iter().map(|c| c.commitment.clone()).collect();
+    let mut p_ch1 = base_challenger.clone();
+    let (acc1, proof1) = prover.prove_with_external_committed_accumulator_batched(
+        &mut p_ch1,
+        &mmcs,
+        &acc_backend,
+        committed1,
+        vec![],
+    );
+    let mut v_ch1 = base_challenger.clone();
+    verifier
+        .verify_with_external_committed_accumulator_batched(
+            &mut v_ch1,
+            &fresh_verifier,
+            &acc_backend,
+            &commits1,
+            &[],
+            &acc1.instance,
+            &proof1,
+        )
+        .expect("honest batched external step must verify");
+
+    let witnesses2: Vec<Vec<F>> = (0..3)
+        .map(|i| make_satisfying_witness(3200 + i as u64))
+        .collect();
+    let committed2: Vec<CommittedCodeword<F, MyMmcs>> = witnesses2
+        .into_iter()
+        .map(|w| prover.commit_witness(w))
+        .collect();
+    let commits2: Vec<MyComm> = committed2.iter().map(|c| c.commitment.clone()).collect();
+    let prior_inst1 = acc1.instance.clone();
+    let mut p_ch2 = base_challenger.clone();
+    let (acc2, proof2) = prover.prove_with_external_committed_accumulator_batched(
+        &mut p_ch2,
+        &mmcs,
+        &acc_backend,
+        committed2,
+        vec![acc1],
+    );
+
+    let mut proof_with_short_fresh_batch = proof2.clone();
+    proof_with_short_fresh_batch.fresh_opening_proofs[0].clear();
+    let mut v_ch_fresh = base_challenger.clone();
+    let err = verifier
+        .verify_with_external_committed_accumulator_batched(
+            &mut v_ch_fresh,
+            &fresh_verifier,
+            &acc_backend,
+            &commits2,
+            std::slice::from_ref(&prior_inst1),
+            &acc2.instance,
+            &proof_with_short_fresh_batch,
+        )
+        .expect_err("short fresh batched opening proof must be rejected");
+    assert!(
+        matches!(
+            err,
+            VerifierError::ShiftQueryCount {
+                expected: 2,
+                got: 0
+            }
+        ),
+        "expected ShiftQueryCount for short fresh batch proof, got {err:?}"
+    );
+
+    let mut proof_with_short_acc_batch = proof2;
+    proof_with_short_acc_batch.acc_merkle_proofs[0].clear();
+    let mut v_ch_acc = base_challenger.clone();
+    let err = verifier
+        .verify_with_external_committed_accumulator_batched(
+            &mut v_ch_acc,
+            &fresh_verifier,
+            &acc_backend,
+            &commits2,
+            std::slice::from_ref(&prior_inst1),
+            &acc2.instance,
+            &proof_with_short_acc_batch,
+        )
+        .expect_err("short accumulator batched opening proof must be rejected");
+    assert!(
+        matches!(
+            err,
+            VerifierError::ShiftQueryCount {
+                expected: 2,
+                got: 0
+            }
+        ),
+        "expected ShiftQueryCount for short accumulator batch proof, got {err:?}"
+    );
 }

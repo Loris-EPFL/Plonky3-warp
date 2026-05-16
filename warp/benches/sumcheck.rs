@@ -17,7 +17,7 @@
 //! recursive circuit; it remains the separate accumulation pipeline being
 //! compared against recursive aggregation.
 //!
-//! Publication-grade recursive comparison runs should be generated through:
+//! Publication-grade three-way comparison runs should be generated through:
 //!
 //! ```bash
 //! CARGO_PROFILE_BENCH_DEBUG=1 \
@@ -25,7 +25,8 @@
 //! scripts/run_recursive_whir_warp_bench.sh
 //! ```
 //!
-//! The runner records metadata, low-noise headline rows with
+//! The runner records independent WHIR, recursive WHIR, and WARP lanes,
+//! metadata, low-noise headline rows with
 //! `P3_WHIR_RECURSIVE_COMPARE_ITERS >= 5` and
 //! `P3_WHIR_RECURSIVE_COMPARE_WARMUP >= 1`, phase-instrumented attribution
 //! rows, WARP arity sweep rows, raw JSONL, logs, and generated figures.
@@ -69,7 +70,7 @@
 
 use std::cell::RefCell;
 use std::env;
-use std::fs::{File, OpenOptions};
+use std::fs::{File, OpenOptions, create_dir_all};
 use std::hint::black_box;
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
@@ -666,6 +667,19 @@ fn make_recursive_whir_inputs(
                         .collect()
                 })
                 .collect();
+            let round_query_sample_index_bits = proof
+                .rounds
+                .iter()
+                .zip(config.round_parameters.iter())
+                .map(|(round, params)| {
+                    let bits = (params.domain_size >> params.folding_factor).ilog2() as usize;
+                    round
+                        .query_sample_indices
+                        .iter()
+                        .map(|&index| query_index_bits(index, bits))
+                        .collect()
+                })
+                .collect();
             let final_round = config.final_round_config();
             let final_bits =
                 (final_round.domain_size >> final_round.folding_factor).ilog2() as usize;
@@ -674,12 +688,19 @@ fn make_recursive_whir_inputs(
                 .iter()
                 .map(|&index| query_index_bits(index, final_bits))
                 .collect();
+            let final_query_sample_index_bits = proof
+                .final_query_sample_indices
+                .iter()
+                .map(|&index| query_index_bits(index, final_bits))
+                .collect();
             WhirProofVerificationInput {
                 commitment,
                 opening_claims: vec![claims],
                 proof,
                 round_query_index_bits,
+                round_query_sample_index_bits,
                 final_query_index_bits,
+                final_query_sample_index_bits,
             }
         })
         .collect()
@@ -1087,6 +1108,31 @@ where
             .map_or(0, SumcheckData::num_rounds)
 }
 
+fn independent_whir_lane_metrics(bundle: &WhirFullBundle) -> LaneMetrics {
+    let proof_bytes = serialized_len(&bundle.proofs, "independent WHIR proofs");
+    let commitment_bytes = serialized_len(&bundle.commitments, "independent WHIR commitments");
+    let field_elem_bytes = serialized_len(&EF::ZERO, "independent WHIR claim field element");
+    let claim_bytes = bundle
+        .claims
+        .iter()
+        .flatten()
+        .map(|(point, _)| (point.num_variables() + 1) * field_elem_bytes)
+        .sum::<usize>();
+    let verifier_payload_bytes = commitment_bytes + claim_bytes;
+    LaneMetrics {
+        proof_bytes,
+        verifier_payload_bytes,
+        total_artifact_bytes: proof_bytes + verifier_payload_bytes,
+        commitments: bundle.commitments.len(),
+        opening_claims: bundle.claims.iter().map(Vec::len).sum(),
+        whir_queries: bundle.proofs.iter().map(whir_proof_query_count).sum(),
+        sumcheck_rounds: bundle.proofs.iter().map(whir_proof_sumcheck_rounds).sum(),
+        table_count: 0,
+        max_table_height: 0,
+        total_table_cells: 0,
+    }
+}
+
 fn recursive_lane_metrics(bundle: &WhirRecursiveBundle) -> LaneMetrics {
     let outer_proof = &bundle.proof.outer_proof;
     let expected_metadata = whir_native_expected_table_metadata::<F, EF>(
@@ -1275,6 +1321,42 @@ fn warp_whir_root_bundle_bytes(bundle: &WarpWhirRootBundle) -> usize {
         .len()
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct WarpProofSizeBreakdown {
+    root_proof_bytes: usize,
+    chain_steps_bytes: usize,
+    chain_step_proofs_bytes: usize,
+    finalizer_bytes: usize,
+    root_iop_proof_bytes: usize,
+    root_iop_reduction_bytes: usize,
+    root_iop_whir_opening_bytes: usize,
+    instance_bytes: usize,
+}
+
+fn warp_proof_size_breakdown(bundle: &WarpWhirRootBundle) -> WarpProofSizeBreakdown {
+    WarpProofSizeBreakdown {
+        root_proof_bytes: serialized_len(&bundle.proof, "WARP root proof"),
+        chain_steps_bytes: serialized_len(&bundle.proof.steps, "WARP chain steps"),
+        chain_step_proofs_bytes: bundle
+            .proof
+            .steps
+            .iter()
+            .map(|step| serialized_len(&step.proof, "WARP chain step proof"))
+            .sum(),
+        finalizer_bytes: serialized_len(&bundle.proof.final_proof, "WARP finalizer proof"),
+        root_iop_proof_bytes: serialized_len(&bundle.root_iop_proof, "WARP root IOP proof"),
+        root_iop_reduction_bytes: serialized_len(
+            &bundle.root_iop_proof.opening.reduction,
+            "WARP root IOP reduction proof",
+        ),
+        root_iop_whir_opening_bytes: serialized_len(
+            &bundle.root_iop_proof.opening.opening,
+            "WARP root IOP WHIR opening proof",
+        ),
+        instance_bytes: serialized_len(&bundle.instance, "WARP final instance"),
+    }
+}
+
 fn warp_lane_metrics(bundle: &WarpWhirRootBundle) -> LaneMetrics {
     LaneMetrics {
         proof_bytes: serialized_len(&(&bundle.proof, &bundle.root_iop_proof), "WARP proof bytes"),
@@ -1375,7 +1457,7 @@ impl<'a> BenchRootIopWhirProver<'a> {
         oracle_id: usize,
         point: RootIopOpeningPoint<EF>,
         value: RootIopOpeningValue<F, EF>,
-    ) -> usize {
+    ) {
         let mut transcript = self.transcript.borrow_mut();
         let claim_id = transcript.claims.len();
         transcript.claims.push(p3_warp::RootIopOpeningClaim {
@@ -1384,7 +1466,6 @@ impl<'a> BenchRootIopWhirProver<'a> {
             point,
             value,
         });
-        claim_id
     }
 
     fn commit_fresh_codewords_shared(
@@ -1419,10 +1500,10 @@ impl<'a> BenchRootIopWhirProver<'a> {
         for ((codeword, witness), (commitment, prover_data)) in
             inputs.into_iter().zip(committed.into_iter())
         {
-            self.transcript
-                .borrow_mut()
-                .oracles
-                .push((commitment.clone(), RootIopOracleValues::Base(Vec::new())));
+            self.transcript.borrow_mut().oracles.push((
+                commitment.clone(),
+                RootIopOracleValues::Base(codeword.clone()),
+            ));
             self.prover_data.borrow_mut().push(prover_data);
             out.push(BenchRootFreshCodeword {
                 commitment: BenchRootCommitment(commitment),
@@ -1468,17 +1549,12 @@ impl<'a> ExternalCodewordOpeningProver<F, BenchRootFreshCodeword> for BenchRootI
                 oracle_id: commitment.0.oracle_id,
                 index,
             })?;
-        let claim_id = self.push_claim(
+        self.push_claim(
             commitment.0.oracle_id,
             RootIopOpeningPoint::RsCodewordIndex(index),
             RootIopOpeningValue::Base(value),
         );
-        Ok((
-            value,
-            RootIopOpeningProof {
-                claim_ids: vec![claim_id],
-            },
-        ))
+        Ok((value, RootIopOpeningProof::new(1)))
     }
 }
 
@@ -1494,7 +1570,6 @@ impl<'a> ExternalCodewordBatchOpeningProver<F, BenchRootFreshCodeword>
     ) -> Result<(Vec<F>, Self::BatchProof), Self::Error> {
         let commitment = committed.commitment();
         let mut values = Vec::with_capacity(indices.len());
-        let mut claim_ids = Vec::with_capacity(indices.len());
         for &index in indices {
             let value = *committed
                 .codeword()
@@ -1503,15 +1578,14 @@ impl<'a> ExternalCodewordBatchOpeningProver<F, BenchRootFreshCodeword>
                     oracle_id: commitment.0.oracle_id,
                     index,
                 })?;
-            let claim_id = self.push_claim(
+            self.push_claim(
                 commitment.0.oracle_id,
                 RootIopOpeningPoint::RsCodewordIndex(index),
                 RootIopOpeningValue::Base(value),
             );
             values.push(value);
-            claim_ids.push(claim_id);
         }
-        Ok((values, RootIopOpeningProof { claim_ids }))
+        Ok((values, RootIopOpeningProof::new(indices.len())))
     }
 }
 
@@ -1535,7 +1609,7 @@ impl<'a> AccumulatorCommitmentBackend<F, EF, BenchChallenger> for BenchRootIopWh
             .map_err(|_| RootIopError::ShapeMismatch)?;
         self.transcript.borrow_mut().oracles.push((
             commitment.clone(),
-            RootIopOracleValues::Extension(Vec::new()),
+            RootIopOracleValues::Extension(codeword.clone()),
         ));
         self.prover_data.borrow_mut().push(prover_data);
         let commitment = BenchRootCommitment(commitment);
@@ -1562,11 +1636,11 @@ impl<'a> AccumulatorCommitmentBackend<F, EF, BenchChallenger> for BenchRootIopWh
         let oracle_id = self.next_oracle_id();
         let (commitment, prover_data) = self
             .root_system
-            .commit_extension_message_oracle(oracle_id, message.to_vec())
+            .commit_extension_oracle_with_message(oracle_id, codeword.clone(), message.to_vec())
             .map_err(|_| RootIopError::ShapeMismatch)?;
         self.transcript.borrow_mut().oracles.push((
             commitment.clone(),
-            RootIopOracleValues::Extension(Vec::new()),
+            RootIopOracleValues::Extension(codeword.clone()),
         ));
         self.prover_data.borrow_mut().push(prover_data);
         let commitment = BenchRootCommitment(commitment);
@@ -1591,17 +1665,12 @@ impl<'a> AccumulatorCommitmentBackend<F, EF, BenchChallenger> for BenchRootIopWh
                 oracle_id: prover_data.commitment.0.oracle_id,
                 index,
             })?;
-        let claim_id = self.push_claim(
+        self.push_claim(
             prover_data.commitment.0.oracle_id,
             RootIopOpeningPoint::RsCodewordIndex(index),
             RootIopOpeningValue::Extension(value),
         );
-        Ok((
-            value,
-            RootIopOpeningProof {
-                claim_ids: vec![claim_id],
-            },
-        ))
+        Ok((value, RootIopOpeningProof::new(1)))
     }
 
     fn observe_commitment(&self, challenger: &mut BenchChallenger, commitment: &Self::Commitment) {
@@ -1629,7 +1698,6 @@ impl<'a> AccumulatorBatchOpeningBackend<F, EF, BenchChallenger> for BenchRootIop
         indices: &[usize],
     ) -> Result<(Vec<EF>, Self::BatchProof), Self::Error> {
         let mut values = Vec::with_capacity(indices.len());
-        let mut claim_ids = Vec::with_capacity(indices.len());
         for &index in indices {
             let value = *prover_data
                 .codeword
@@ -1638,15 +1706,14 @@ impl<'a> AccumulatorBatchOpeningBackend<F, EF, BenchChallenger> for BenchRootIop
                     oracle_id: prover_data.commitment.0.oracle_id,
                     index,
                 })?;
-            let claim_id = self.push_claim(
+            self.push_claim(
                 prover_data.commitment.0.oracle_id,
                 RootIopOpeningPoint::RsCodewordIndex(index),
                 RootIopOpeningValue::Extension(value),
             );
             values.push(value);
-            claim_ids.push(claim_id);
         }
-        Ok((values, RootIopOpeningProof { claim_ids }))
+        Ok((values, RootIopOpeningProof::new(indices.len())))
     }
 
     fn verify_batch_opening(
@@ -1679,18 +1746,19 @@ impl<'a> AccumulatorPointOpeningBackend<F, EF, BenchChallenger> for BenchRootIop
         }
         let poly = Poly::<EF>::new(prover_data.codeword.clone());
         let mut values = Vec::with_capacity(opening_points[0].len());
-        let mut claim_ids = Vec::with_capacity(opening_points[0].len());
         for point in &opening_points[0] {
             let value = poly.eval_ext::<F>(point);
-            let claim_id = self.push_claim(
+            self.push_claim(
                 prover_data.commitment.0.oracle_id,
                 RootIopOpeningPoint::Mle(point.as_slice().to_vec()),
                 RootIopOpeningValue::Extension(value),
             );
             values.push(value);
-            claim_ids.push(claim_id);
         }
-        Ok((vec![values], RootIopOpeningProof { claim_ids }))
+        Ok((
+            vec![values],
+            RootIopOpeningProof::new(opening_points[0].len()),
+        ))
     }
 
     fn verify_points(
@@ -1730,13 +1798,14 @@ impl BenchRootIopWhirVerifier {
 
     fn record_expected_claim(
         &self,
-        proof_claim_id: usize,
         oracle_id: usize,
         point: RootIopOpeningPoint<EF>,
         value: RootIopOpeningValue<F, EF>,
     ) {
-        self.expected_claims.borrow_mut().push(RootIopOpeningClaim {
-            claim_id: proof_claim_id,
+        let mut expected_claims = self.expected_claims.borrow_mut();
+        let claim_id = expected_claims.len();
+        expected_claims.push(RootIopOpeningClaim {
+            claim_id,
             oracle_id,
             point,
             value,
@@ -1784,11 +1853,10 @@ impl ExternalCodewordOpeningVerifier<F, BenchChallenger> for BenchRootIopWhirVer
         {
             return Err(RootIopError::ShapeMismatch);
         }
-        if proof.claim_ids.len() != 1 {
+        if proof.len() != 1 {
             return Err(RootIopError::OpeningArityMismatch);
         }
         self.record_expected_claim(
-            proof.claim_ids[0],
             commitment.0.oracle_id,
             RootIopOpeningPoint::RsCodewordIndex(index),
             RootIopOpeningValue::Base(value),
@@ -1799,6 +1867,10 @@ impl ExternalCodewordOpeningVerifier<F, BenchChallenger> for BenchRootIopWhirVer
 
 impl ExternalCodewordBatchOpeningVerifier<F, BenchChallenger> for BenchRootIopWhirVerifier {
     type BatchProof = RootIopOpeningProof;
+
+    fn batch_opening_len(&self, proof: &Self::BatchProof) -> Option<usize> {
+        Some(proof.len())
+    }
 
     fn verify_batch_opening(
         &self,
@@ -1811,17 +1883,12 @@ impl ExternalCodewordBatchOpeningVerifier<F, BenchChallenger> for BenchRootIopWh
         if commitment.0.field != RootIopOracleField::Base
             || commitment.0.log_len != log_codeword_len
             || indices.len() != values.len()
-            || indices.len() != proof.claim_ids.len()
+            || indices.len() != proof.len()
         {
             return Err(RootIopError::ShapeMismatch);
         }
-        for ((&index, &value), &claim_id) in indices
-            .iter()
-            .zip(values.iter())
-            .zip(proof.claim_ids.iter())
-        {
+        for (&index, &value) in indices.iter().zip(values.iter()) {
             self.record_expected_claim(
-                claim_id,
                 commitment.0.oracle_id,
                 RootIopOpeningPoint::RsCodewordIndex(index),
                 RootIopOpeningValue::Base(value),
@@ -1867,12 +1934,11 @@ impl AccumulatorCommitmentBackend<F, EF, BenchChallenger> for BenchRootIopWhirVe
     ) -> Result<(), Self::Error> {
         if commitment.0.field != RootIopOracleField::Extension
             || commitment.0.log_len != log_codeword_len
-            || proof.claim_ids.len() != 1
+            || proof.len() != 1
         {
             return Err(RootIopError::ShapeMismatch);
         }
         self.record_expected_claim(
-            proof.claim_ids[0],
             commitment.0.oracle_id,
             RootIopOpeningPoint::RsCodewordIndex(index),
             RootIopOpeningValue::Extension(value),
@@ -1883,6 +1949,10 @@ impl AccumulatorCommitmentBackend<F, EF, BenchChallenger> for BenchRootIopWhirVe
 
 impl AccumulatorBatchOpeningBackend<F, EF, BenchChallenger> for BenchRootIopWhirVerifier {
     type BatchProof = RootIopOpeningProof;
+
+    fn batch_opening_len(&self, proof: &Self::BatchProof) -> Option<usize> {
+        Some(proof.len())
+    }
 
     fn open_batch(
         &self,
@@ -1903,17 +1973,12 @@ impl AccumulatorBatchOpeningBackend<F, EF, BenchChallenger> for BenchRootIopWhir
         if commitment.0.field != RootIopOracleField::Extension
             || commitment.0.log_len != log_codeword_len
             || indices.len() != values.len()
-            || indices.len() != proof.claim_ids.len()
+            || indices.len() != proof.len()
         {
             return Err(RootIopError::ShapeMismatch);
         }
-        for ((&index, &value), &claim_id) in indices
-            .iter()
-            .zip(values.iter())
-            .zip(proof.claim_ids.iter())
-        {
+        for (&index, &value) in indices.iter().zip(values.iter()) {
             self.record_expected_claim(
-                claim_id,
                 commitment.0.oracle_id,
                 RootIopOpeningPoint::RsCodewordIndex(index),
                 RootIopOpeningValue::Extension(value),
@@ -1947,13 +2012,12 @@ impl AccumulatorPointOpeningBackend<F, EF, BenchChallenger> for BenchRootIopWhir
     ) -> Result<(), Self::PointError> {
         if commitment.0.field != RootIopOracleField::Extension
             || opening_claims.len() != 1
-            || opening_claims[0].len() != proof.claim_ids.len()
+            || opening_claims[0].len() != proof.len()
         {
             return Err(RootIopError::OpeningArityMismatch);
         }
-        for ((point, value), &claim_id) in opening_claims[0].iter().zip(proof.claim_ids.iter()) {
+        for (point, value) in &opening_claims[0] {
             self.record_expected_claim(
-                claim_id,
                 commitment.0.oracle_id,
                 RootIopOpeningPoint::Mle(point.as_slice().to_vec()),
                 RootIopOpeningValue::Extension(*value),
@@ -2781,6 +2845,70 @@ fn time_paired_stats(
     )
 }
 
+fn time_three_way_stats(
+    iterations: usize,
+    warmup: usize,
+    mut first: impl FnMut(),
+    mut second: impl FnMut(),
+    mut third: impl FnMut(),
+) -> (DurationStats, DurationStats, DurationStats) {
+    for _ in 0..warmup {
+        first();
+        second();
+        third();
+    }
+
+    let mut first_samples = Vec::with_capacity(iterations);
+    let mut second_samples = Vec::with_capacity(iterations);
+    let mut third_samples = Vec::with_capacity(iterations);
+    for i in 0..iterations {
+        match i % 6 {
+            0 => {
+                measure_into(&mut first_samples, &mut first);
+                measure_into(&mut second_samples, &mut second);
+                measure_into(&mut third_samples, &mut third);
+            }
+            1 => {
+                measure_into(&mut first_samples, &mut first);
+                measure_into(&mut third_samples, &mut third);
+                measure_into(&mut second_samples, &mut second);
+            }
+            2 => {
+                measure_into(&mut second_samples, &mut second);
+                measure_into(&mut first_samples, &mut first);
+                measure_into(&mut third_samples, &mut third);
+            }
+            3 => {
+                measure_into(&mut second_samples, &mut second);
+                measure_into(&mut third_samples, &mut third);
+                measure_into(&mut first_samples, &mut first);
+            }
+            4 => {
+                measure_into(&mut third_samples, &mut third);
+                measure_into(&mut first_samples, &mut first);
+                measure_into(&mut second_samples, &mut second);
+            }
+            _ => {
+                measure_into(&mut third_samples, &mut third);
+                measure_into(&mut second_samples, &mut second);
+                measure_into(&mut first_samples, &mut first);
+            }
+        }
+    }
+
+    (
+        duration_stats(&mut first_samples),
+        duration_stats(&mut second_samples),
+        duration_stats(&mut third_samples),
+    )
+}
+
+fn measure_into(samples: &mut Vec<Duration>, mut f: impl FnMut()) {
+    let start = Instant::now();
+    f();
+    samples.push(start.elapsed());
+}
+
 #[allow(dead_code)]
 fn print_progress(message: impl core::fmt::Display) {
     eprintln!("{message}");
@@ -2825,11 +2953,22 @@ fn duration_nanos(duration: Duration) -> u128 {
     duration.as_nanos()
 }
 
+fn ensure_jsonl_parent(path: &str) {
+    if let Some(parent) = std::path::Path::new(path).parent()
+        && !parent.as_os_str().is_empty()
+    {
+        create_dir_all(parent)
+            .unwrap_or_else(|err| panic!("create JSONL parent `{}`: {err}", parent.display()));
+    }
+}
+
 fn reset_jsonl_output(path: &str) {
+    ensure_jsonl_parent(path);
     File::create(path).unwrap_or_else(|err| panic!("create JSONL output `{path}`: {err}"));
 }
 
 fn append_jsonl_output(path: &str, line: &str) {
+    ensure_jsonl_parent(path);
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -2849,10 +2988,13 @@ fn write_recursive_compare_jsonl(
     outer_openings: usize,
     iterations: usize,
     warmup: usize,
+    independent_prove_stats: DurationStats,
     recursive_prove_stats: DurationStats,
     warp_prove_stats: DurationStats,
+    independent_verify_stats: DurationStats,
     recursive_verify_stats: DurationStats,
     warp_verify_stats: DurationStats,
+    independent_metrics: LaneMetrics,
     recursive_metrics: LaneMetrics,
     warp_metrics: LaneMetrics,
     recursive_phases: WhirRecursivePhaseDurations,
@@ -2860,6 +3002,7 @@ fn write_recursive_compare_jsonl(
     recursive_bundle: &WhirRecursiveBundle,
     warp_bundle: &WarpWhirRootBundle,
 ) {
+    let warp_size_breakdown = warp_proof_size_breakdown(warp_bundle);
     append_jsonl_output(
         path,
         &format!(
@@ -2877,6 +3020,7 @@ fn write_recursive_compare_jsonl(
                 "\"parallel_feature\":{},",
                 "\"rayon_threads\":{},",
                 "\"cpu_available_parallelism\":{},",
+                "\"independent_whir_proofs\":{},",
                 "\"recursive_public_inputs\":{},",
                 "\"recursive_private_inputs\":{},",
                 "\"recursive_native_whir_proofs\":{},",
@@ -2884,16 +3028,24 @@ fn write_recursive_compare_jsonl(
                 "\"warp_oracles\":{},",
                 "\"warp_claims\":{},",
                 "\"timing_nanos\":{{",
+                "\"independent_prove_median\":{},",
                 "\"recursive_prove_median\":{},",
                 "\"warp_prove_median\":{},",
+                "\"independent_verify_median\":{},",
                 "\"recursive_verify_median\":{},",
                 "\"warp_verify_median\":{}",
                 "}},",
                 "\"timing_stats_nanos\":{{",
+                "\"independent_prove\":{{\"min\":{},\"median\":{},\"mean\":{},\"max\":{},\"stddev\":{}}},",
                 "\"recursive_prove\":{{\"min\":{},\"median\":{},\"mean\":{},\"max\":{},\"stddev\":{}}},",
                 "\"warp_prove\":{{\"min\":{},\"median\":{},\"mean\":{},\"max\":{},\"stddev\":{}}},",
+                "\"independent_verify\":{{\"min\":{},\"median\":{},\"mean\":{},\"max\":{},\"stddev\":{}}},",
                 "\"recursive_verify\":{{\"min\":{},\"median\":{},\"mean\":{},\"max\":{},\"stddev\":{}}},",
                 "\"warp_verify\":{{\"min\":{},\"median\":{},\"mean\":{},\"max\":{},\"stddev\":{}}}",
+                "}},",
+                "\"independent_phases_nanos\":{{",
+                "\"full_pcs\":{},",
+                "\"total\":{}",
                 "}},",
                 "\"recursive_phases_nanos\":{{",
                 "\"native_whir\":{},",
@@ -2910,6 +3062,15 @@ fn write_recursive_compare_jsonl(
                 "\"dacc\":{},",
                 "\"root_whir\":{},",
                 "\"total\":{}",
+                "}},",
+                "\"independent_metrics\":{{",
+                "\"proof_bytes\":{},",
+                "\"verifier_payload_bytes\":{},",
+                "\"total_artifact_bytes\":{},",
+                "\"commitments\":{},",
+                "\"opening_claims\":{},",
+                "\"whir_queries\":{},",
+                "\"sumcheck_rounds\":{}",
                 "}},",
                 "\"recursive_metrics\":{{",
                 "\"proof_bytes\":{},",
@@ -2931,6 +3092,16 @@ fn write_recursive_compare_jsonl(
                 "\"opening_claims\":{},",
                 "\"whir_queries\":{},",
                 "\"sumcheck_rounds\":{}",
+                "}},",
+                "\"warp_size_breakdown_bytes\":{{",
+                "\"root_proof\":{},",
+                "\"chain_steps\":{},",
+                "\"chain_step_proofs\":{},",
+                "\"finalizer\":{},",
+                "\"root_iop_proof\":{},",
+                "\"root_iop_reduction\":{},",
+                "\"root_iop_whir_opening\":{},",
+                "\"final_instance\":{}",
                 "}}",
                 "}}"
             ),
@@ -2945,16 +3116,24 @@ fn write_recursive_compare_jsonl(
             cfg!(feature = "parallel"),
             current_num_threads(),
             std::thread::available_parallelism().map_or(1, usize::from),
+            recursive_bundle.native.proofs.len(),
             recursive_bundle.recursive_public_inputs,
             recursive_bundle.recursive_private_inputs,
             recursive_bundle.native.proofs.len(),
             recursive_bundle.recursive_mmcs_ops,
             warp_bundle.oracle_count,
             warp_bundle.claim_count,
+            duration_nanos(independent_prove_stats.median),
             duration_nanos(recursive_prove_stats.median),
             duration_nanos(warp_prove_stats.median),
+            duration_nanos(independent_verify_stats.median),
             duration_nanos(recursive_verify_stats.median),
             duration_nanos(warp_verify_stats.median),
+            duration_nanos(independent_prove_stats.min),
+            duration_nanos(independent_prove_stats.median),
+            duration_nanos(independent_prove_stats.mean),
+            duration_nanos(independent_prove_stats.max),
+            duration_nanos(independent_prove_stats.stddev),
             duration_nanos(recursive_prove_stats.min),
             duration_nanos(recursive_prove_stats.median),
             duration_nanos(recursive_prove_stats.mean),
@@ -2965,6 +3144,11 @@ fn write_recursive_compare_jsonl(
             duration_nanos(warp_prove_stats.mean),
             duration_nanos(warp_prove_stats.max),
             duration_nanos(warp_prove_stats.stddev),
+            duration_nanos(independent_verify_stats.min),
+            duration_nanos(independent_verify_stats.median),
+            duration_nanos(independent_verify_stats.mean),
+            duration_nanos(independent_verify_stats.max),
+            duration_nanos(independent_verify_stats.stddev),
             duration_nanos(recursive_verify_stats.min),
             duration_nanos(recursive_verify_stats.median),
             duration_nanos(recursive_verify_stats.mean),
@@ -2975,6 +3159,8 @@ fn write_recursive_compare_jsonl(
             duration_nanos(warp_verify_stats.mean),
             duration_nanos(warp_verify_stats.max),
             duration_nanos(warp_verify_stats.stddev),
+            duration_nanos(recursive_phases.native_whir),
+            duration_nanos(recursive_phases.native_whir),
             duration_nanos(recursive_phases.native_whir),
             duration_nanos(recursive_phases.circuit_build),
             duration_nanos(recursive_phases.trace_generation),
@@ -2987,6 +3173,13 @@ fn write_recursive_compare_jsonl(
             duration_nanos(warp_phases.dacc),
             duration_nanos(warp_phases.root_whir),
             duration_nanos(warp_phases.total),
+            independent_metrics.proof_bytes,
+            independent_metrics.verifier_payload_bytes,
+            independent_metrics.total_artifact_bytes,
+            independent_metrics.commitments,
+            independent_metrics.opening_claims,
+            independent_metrics.whir_queries,
+            independent_metrics.sumcheck_rounds,
             recursive_metrics.proof_bytes,
             recursive_metrics.verifier_payload_bytes,
             recursive_metrics.total_artifact_bytes,
@@ -3004,6 +3197,182 @@ fn write_recursive_compare_jsonl(
             warp_metrics.opening_claims,
             warp_metrics.whir_queries,
             warp_metrics.sumcheck_rounds,
+            warp_size_breakdown.root_proof_bytes,
+            warp_size_breakdown.chain_steps_bytes,
+            warp_size_breakdown.chain_step_proofs_bytes,
+            warp_size_breakdown.finalizer_bytes,
+            warp_size_breakdown.root_iop_proof_bytes,
+            warp_size_breakdown.root_iop_reduction_bytes,
+            warp_size_breakdown.root_iop_whir_opening_bytes,
+            warp_size_breakdown.instance_bytes,
+        ),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_warp_whir_root_compare_jsonl(
+    path: &str,
+    num_variables: usize,
+    n: usize,
+    steps: usize,
+    arity: usize,
+    folding_factor: usize,
+    iterations: usize,
+    warmup: usize,
+    whir_prove_stats: DurationStats,
+    warp_prove_stats: DurationStats,
+    whir_verify_stats: DurationStats,
+    warp_verify_stats: DurationStats,
+    whir_shape: WhirRoundShape,
+    whir_bytes: usize,
+    warp_bytes: usize,
+    bundle: &WarpWhirRootBundle,
+    warp_phases: &WarpWhirRootPhaseDurations,
+    warp_verify_phases: Option<&WarpWhirRootVerifyPhaseDurations>,
+) {
+    let warp_size_breakdown = warp_proof_size_breakdown(bundle);
+    let (verify_setup, verify_chain, verify_root_system_setup, verify_root_whir, verify_total) =
+        if let Some(phases) = warp_verify_phases {
+            (
+                duration_nanos(phases.setup),
+                duration_nanos(phases.chain),
+                duration_nanos(phases.root_system_setup),
+                duration_nanos(phases.root_whir),
+                duration_nanos(phases.total),
+            )
+        } else {
+            (0, 0, 0, 0, 0)
+        };
+    append_jsonl_output(
+        path,
+        &format!(
+            concat!(
+                "{{",
+                "\"benchmark\":\"warp_whir_root_vs_n_whir\",",
+                "\"k\":{},",
+                "\"n\":{},",
+                "\"steps\":{},",
+                "\"arity\":{},",
+                "\"whir_folding_factor\":{},",
+                "\"iterations\":{},",
+                "\"warmup\":{},",
+                "\"parallel_feature\":{},",
+                "\"rayon_threads\":{},",
+                "\"cpu_available_parallelism\":{},",
+                "\"warp_oracles\":{},",
+                "\"warp_claims\":{},",
+                "\"warp_whir_openings\":{},",
+                "\"whir_shape\":{{",
+                "\"rounds\":{},",
+                "\"final_sumcheck_rounds\":{},",
+                "\"final_queries\":{}",
+                "}},",
+                "\"timing_nanos\":{{",
+                "\"whir_prove_median\":{},",
+                "\"warp_prove_median\":{},",
+                "\"whir_verify_median\":{},",
+                "\"warp_verify_median\":{}",
+                "}},",
+                "\"timing_stats_nanos\":{{",
+                "\"whir_prove\":{{\"min\":{},\"median\":{},\"mean\":{},\"max\":{},\"stddev\":{}}},",
+                "\"warp_prove\":{{\"min\":{},\"median\":{},\"mean\":{},\"max\":{},\"stddev\":{}}},",
+                "\"whir_verify\":{{\"min\":{},\"median\":{},\"mean\":{},\"max\":{},\"stddev\":{}}},",
+                "\"warp_verify\":{{\"min\":{},\"median\":{},\"mean\":{},\"max\":{},\"stddev\":{}}}",
+                "}},",
+                "\"warp_phases_nanos\":{{",
+                "\"setup\":{},",
+                "\"encode\":{},",
+                "\"shared_commit\":{},",
+                "\"vacc_total\":{},",
+                "\"dacc\":{},",
+                "\"root_whir\":{},",
+                "\"total\":{}",
+                "}},",
+                "\"warp_verify_phases_nanos\":{{",
+                "\"setup\":{},",
+                "\"chain\":{},",
+                "\"root_system_setup\":{},",
+                "\"root_whir\":{},",
+                "\"total\":{}",
+                "}},",
+                "\"proof_bytes\":{{",
+                "\"whir_artifact\":{},",
+                "\"warp_proof\":{}",
+                "}},",
+                "\"warp_size_breakdown_bytes\":{{",
+                "\"root_proof\":{},",
+                "\"chain_steps\":{},",
+                "\"chain_step_proofs\":{},",
+                "\"finalizer\":{},",
+                "\"root_iop_proof\":{},",
+                "\"root_iop_reduction\":{},",
+                "\"root_iop_whir_opening\":{},",
+                "\"final_instance\":{}",
+                "}}",
+                "}}"
+            ),
+            num_variables,
+            n,
+            steps,
+            arity,
+            folding_factor,
+            iterations,
+            warmup,
+            cfg!(feature = "parallel"),
+            current_num_threads(),
+            std::thread::available_parallelism().map_or(1, usize::from),
+            bundle.oracle_count,
+            bundle.claim_count,
+            bundle.whir_opening_count,
+            whir_shape.rounds,
+            whir_shape.final_sumcheck_rounds,
+            whir_shape.final_queries,
+            duration_nanos(whir_prove_stats.median),
+            duration_nanos(warp_prove_stats.median),
+            duration_nanos(whir_verify_stats.median),
+            duration_nanos(warp_verify_stats.median),
+            duration_nanos(whir_prove_stats.min),
+            duration_nanos(whir_prove_stats.median),
+            duration_nanos(whir_prove_stats.mean),
+            duration_nanos(whir_prove_stats.max),
+            duration_nanos(whir_prove_stats.stddev),
+            duration_nanos(warp_prove_stats.min),
+            duration_nanos(warp_prove_stats.median),
+            duration_nanos(warp_prove_stats.mean),
+            duration_nanos(warp_prove_stats.max),
+            duration_nanos(warp_prove_stats.stddev),
+            duration_nanos(whir_verify_stats.min),
+            duration_nanos(whir_verify_stats.median),
+            duration_nanos(whir_verify_stats.mean),
+            duration_nanos(whir_verify_stats.max),
+            duration_nanos(whir_verify_stats.stddev),
+            duration_nanos(warp_verify_stats.min),
+            duration_nanos(warp_verify_stats.median),
+            duration_nanos(warp_verify_stats.mean),
+            duration_nanos(warp_verify_stats.max),
+            duration_nanos(warp_verify_stats.stddev),
+            duration_nanos(warp_phases.setup),
+            duration_nanos(warp_phases.encode),
+            duration_nanos(warp_phases.shared_commit),
+            duration_nanos(warp_phases.vacc_total),
+            duration_nanos(warp_phases.dacc),
+            duration_nanos(warp_phases.root_whir),
+            duration_nanos(warp_phases.total),
+            verify_setup,
+            verify_chain,
+            verify_root_system_setup,
+            verify_root_whir,
+            verify_total,
+            whir_bytes,
+            warp_bytes,
+            warp_size_breakdown.root_proof_bytes,
+            warp_size_breakdown.chain_steps_bytes,
+            warp_size_breakdown.chain_step_proofs_bytes,
+            warp_size_breakdown.finalizer_bytes,
+            warp_size_breakdown.root_iop_proof_bytes,
+            warp_size_breakdown.root_iop_reduction_bytes,
+            warp_size_breakdown.root_iop_whir_opening_bytes,
+            warp_size_breakdown.instance_bytes,
         ),
     );
 }
@@ -3013,6 +3382,12 @@ fn print_warp_whir_root_comparison(num_variable_cases: &[usize], n_values: &[usi
     let warmup = parse_usize_env("P3_WARP_WHIR_ROOT_COMPARE_WARMUP", 1);
     let print_phases = env::var("P3_WARP_WHIR_ROOT_PHASES").as_deref() == Ok("1");
     let print_stats = iterations > 1 || env::var("P3_WARP_WHIR_ROOT_STATS").as_deref() == Ok("1");
+    let json_path = env::var("P3_WARP_WHIR_ROOT_JSON")
+        .ok()
+        .filter(|path| !path.is_empty());
+    if let Some(path) = &json_path {
+        reset_jsonl_output(path);
+    }
     let arity = warp_fresh_per_step();
     let folding_factor = whir_folding_factor();
     eprintln!();
@@ -3034,6 +3409,9 @@ fn print_warp_whir_root_comparison(num_variable_cases: &[usize], n_values: &[usi
     );
     if print_phases {
         eprintln!("    Extra WARP phase timings are single setup runs used for verifier input.");
+    }
+    if let Some(path) = &json_path {
+        eprintln!("    JSONL rows: {path}");
     }
     eprintln!(
         "{:<6}{:<8}{:<8}{:<10}{:<10}{:<12}{:<16}{:<16}{:<24}{:<16}{:<16}{:<24}",
@@ -3098,6 +3476,7 @@ fn print_warp_whir_root_comparison(num_variable_cases: &[usize], n_values: &[usi
             let whir_shape = whir_round_shape(&fixture.mmcs, num_variables);
             let whir_bytes = whir_full_bundle_bytes(&whir_bundle);
             let warp_bytes = warp_whir_root_bundle_bytes(&bundle);
+            let warp_size_breakdown = warp_proof_size_breakdown(&bundle);
             let warp_verify_phases = if print_phases {
                 Some(verify_warp_whir_root_bundle_with_phases(&fixture, &bundle))
             } else {
@@ -3116,6 +3495,28 @@ fn print_warp_whir_root_comparison(num_variable_cases: &[usize], n_values: &[usi
                     verify_warp_whir_root_bundle(&fixture, &bundle);
                 },
             );
+            if let Some(path) = &json_path {
+                write_warp_whir_root_compare_jsonl(
+                    path,
+                    num_variables,
+                    n,
+                    steps,
+                    arity,
+                    folding_factor,
+                    iterations,
+                    warmup,
+                    whir_prove_stats,
+                    warp_prove_stats,
+                    whir_verify_stats,
+                    warp_verify_stats,
+                    whir_shape,
+                    whir_bytes,
+                    warp_bytes,
+                    &bundle,
+                    &warp_phases,
+                    warp_verify_phases.as_ref(),
+                );
+            }
 
             eprintln!(
                 "{:<6}{:<8}{:<8}{:<10}{:<10}{:<12}{:<16}{:<16}{:<24}{:<16}{:<16}{:<24}",
@@ -3142,6 +3543,17 @@ fn print_warp_whir_root_comparison(num_variable_cases: &[usize], n_values: &[usi
                     "      Verify stats: WHIR [{}] | WARP [{}]",
                     format_duration_stats(whir_verify_stats),
                     format_duration_stats(warp_verify_stats),
+                );
+                eprintln!(
+                    "      WARP size breakdown: root_proof={} chain_steps={} chain_step_proofs={} finalizer={} root_iop_proof={} root_iop_reduction={} root_iop_whir_opening={} final_instance={}",
+                    warp_size_breakdown.root_proof_bytes,
+                    warp_size_breakdown.chain_steps_bytes,
+                    warp_size_breakdown.chain_step_proofs_bytes,
+                    warp_size_breakdown.finalizer_bytes,
+                    warp_size_breakdown.root_iop_proof_bytes,
+                    warp_size_breakdown.root_iop_reduction_bytes,
+                    warp_size_breakdown.root_iop_whir_opening_bytes,
+                    warp_size_breakdown.instance_bytes,
                 );
             }
             if print_phases {
@@ -3316,7 +3728,12 @@ fn print_recursive_whir_vs_warp_comparison(num_variable_cases: &[usize], n_value
         reset_jsonl_output(path);
     }
     eprintln!();
-    eprintln!("=== Recursive N-WHIR aggregate proof vs WHIR-backed WARP root comparison ===");
+    eprintln!(
+        "=== Independent WHIR vs recursive N-WHIR aggregate proof vs WHIR-backed WARP root comparison ==="
+    );
+    eprintln!(
+        "    Independent lane: build and verify N full native WHIR PCS proofs with no aggregation."
+    );
     eprintln!(
         "    Recursive lane: build N native WHIR proofs, run one verifier circuit for those N proofs, then use the WHIR-native outer path for its trace."
     );
@@ -3325,7 +3742,7 @@ fn print_recursive_whir_vs_warp_comparison(num_variable_cases: &[usize], n_value
     );
     eprintln!("    WARP lane: existing WARP VACC/DACC root proof, kept outside recursion.");
     eprintln!(
-        "    Comparison contract: both lanes use the same Boolean witnesses, k/N grid, BabyBear D4 field, WHIR folding factor, MMCS, challenger, and Reed-Solomon code."
+        "    Comparison contract: all lanes use the same Boolean witnesses, k/N grid, BabyBear D4 field, WHIR folding factor, MMCS, challenger, and Reed-Solomon code."
     );
     eprintln!(
         "    Soundness: full benchmark path; no count-only WitnessChecks summary is accepted{}.",
@@ -3345,7 +3762,7 @@ fn print_recursive_whir_vs_warp_comparison(num_variable_cases: &[usize], n_value
         cpu_parallelism,
     );
     eprintln!(
-        "    Recursive prove samples include native WHIR proofs, verifier-circuit witness generation, and the outer WHIR-native proof."
+        "    Recursive prove samples include native WHIR proofs, verifier-circuit witness generation, and the outer WHIR-native proof. Independent WHIR samples stop after the N native proofs."
     );
     eprintln!(
         "    Times are medians over {iterations} sample(s) after {warmup} warmup iteration(s); verifier timings are paired."
@@ -3365,16 +3782,21 @@ fn print_recursive_whir_vs_warp_comparison(num_variable_cases: &[usize], n_value
         eprintln!("    WHIR-native JSONL rows: {path}");
     }
     eprintln!(
-        "{:<6}{:<8}{:<8}{:<18}{:<18}{:<24}{:<18}{:<18}{:<24}{:<14}{:<14}{:<14}",
+        "{:<6}{:<8}{:<8}{:<18}{:<18}{:<18}{:<18}{:<22}{:<18}{:<18}{:<18}{:<18}{:<22}{:<14}{:<14}{:<14}{:<14}",
         "k",
         "N",
         "steps",
+        "indep prove",
         "recursive prove",
         "warp prove",
-        "prove Δ",
+        "WARP/ind prove",
+        "WARP/rec prove",
+        "indep verify",
         "recursive verify",
         "warp verify",
-        "verify Δ",
+        "WARP/ind verify",
+        "WARP/rec verify",
+        "ind proof B",
         "rec proof B",
         "warp proof B",
         "mmcs ops",
@@ -3384,16 +3806,21 @@ fn print_recursive_whir_vs_warp_comparison(num_variable_cases: &[usize], n_value
         for &n in n_values {
             if n < arity || (n - arity) % (arity - 1) != 0 {
                 eprintln!(
-                    "{:<6}{:<8}{:<8}{:<18}{:<18}{:<24}{:<18}{:<18}{:<24}{:<14}{:<14}{:<14}",
+                    "{:<6}{:<8}{:<8}{:<18}{:<18}{:<18}{:<18}{:<22}{:<18}{:<18}{:<18}{:<18}{:<22}{:<14}{:<14}{:<14}{:<14}",
                     num_variables,
                     n,
                     "-",
                     "skip",
                     "skip",
+                    "skip",
+                    "-",
                     "-",
                     "skip",
                     "skip",
+                    "skip",
+                    "-",
                     "invalid WARP N",
+                    "-",
                     "-",
                     "-",
                     "-",
@@ -3413,16 +3840,21 @@ fn print_recursive_whir_vs_warp_comparison(num_variable_cases: &[usize], n_value
                     Ok(bundle) => bundle,
                     Err(WhirNativeCircuitError::UnsupportedSoundComponent(message)) => {
                         eprintln!(
-                            "{:<6}{:<8}{:<8}{:<18}{:<18}{:<24}{:<18}{:<18}{:<24}{:<14}{:<14}{:<14}",
+                            "{:<6}{:<8}{:<8}{:<18}{:<18}{:<18}{:<18}{:<22}{:<18}{:<18}{:<18}{:<18}{:<22}{:<14}{:<14}{:<14}{:<14}",
                             num_variables,
                             n,
                             steps,
+                            "not run",
                             "unsupported",
                             "not run",
                             "-",
+                            "-",
+                            "not run",
                             "unsupported",
                             "not run",
+                            "-",
                             "see below",
+                            "-",
                             "-",
                             "-",
                             "-",
@@ -3434,26 +3866,32 @@ fn print_recursive_whir_vs_warp_comparison(num_variable_cases: &[usize], n_value
                 };
 
             print_progress(format!(
-                "    running k={num_variables}, N={n}: paired recursive-WHIR/WARP prover samples..."
+                "    running k={num_variables}, N={n}: independent-WHIR/recursive-WHIR/WARP prover samples..."
             ));
-            let (recursive_prove_stats, warp_prove_stats) = time_paired_stats(
-                iterations,
-                warmup,
-                || {
-                    prove_n_whir_recursive(&fixture, &warp_witnesses);
-                },
-                || {
-                    prove_warp_whir_root(&fixture, &warp_witnesses);
-                },
-            );
+            let (independent_prove_stats, recursive_prove_stats, warp_prove_stats) =
+                time_three_way_stats(
+                    iterations,
+                    warmup,
+                    || {
+                        prove_n_whir_full_pcs(&fixture, &warp_witnesses);
+                    },
+                    || {
+                        prove_n_whir_recursive(&fixture, &warp_witnesses);
+                    },
+                    || {
+                        prove_warp_whir_root(&fixture, &warp_witnesses);
+                    },
+                );
 
             print_progress(format!(
                 "    running k={num_variables}, N={n}: WARP verifier setup..."
             ));
             let (warp_bundle, _warp_phases) =
                 build_warp_whir_root_bundle_with_phases(&fixture, &warp_witnesses);
+            let independent_metrics = independent_whir_lane_metrics(&recursive_bundle.native);
             let recursive_metrics = recursive_lane_metrics(&recursive_bundle);
             let warp_metrics = warp_lane_metrics(&warp_bundle);
+            let warp_size_breakdown = warp_proof_size_breakdown(&warp_bundle);
             let recursive_verify_phases = if print_phases {
                 Some(
                     try_verify_n_whir_recursive_bundle_with_phases(&recursive_bundle)
@@ -3472,33 +3910,52 @@ fn print_recursive_whir_vs_warp_comparison(num_variable_cases: &[usize], n_value
             };
 
             print_progress(format!(
-                "    running k={num_variables}, N={n}: paired recursive-WHIR/WARP verifier samples..."
+                "    running k={num_variables}, N={n}: independent-WHIR/recursive-WHIR/WARP verifier samples..."
             ));
-            let (recursive_verify_stats, warp_verify_stats) = time_paired_stats(
-                iterations,
-                warmup,
-                || {
-                    verify_n_whir_recursive_bundle(&recursive_bundle);
-                },
-                || {
-                    verify_warp_whir_root_bundle(&fixture, &warp_bundle);
-                },
-            );
+            let (independent_verify_stats, recursive_verify_stats, warp_verify_stats) =
+                time_three_way_stats(
+                    iterations,
+                    warmup,
+                    || {
+                        verify_n_whir_full_pcs_bundle(&fixture, &recursive_bundle.native);
+                    },
+                    || {
+                        verify_n_whir_recursive_bundle(&recursive_bundle);
+                    },
+                    || {
+                        verify_warp_whir_root_bundle(&fixture, &warp_bundle);
+                    },
+                );
 
             eprintln!(
-                "{:<6}{:<8}{:<8}{:<18}{:<18}{:<24}{:<18}{:<18}{:<24}{:<14}{:<14}{:<14}",
+                "{:<6}{:<8}{:<8}{:<18}{:<18}{:<18}{:<18}{:<22}{:<18}{:<18}{:<18}{:<18}{:<22}{:<14}{:<14}{:<14}{:<14}",
                 num_variables,
                 n,
                 steps,
+                format_duration(independent_prove_stats.median),
                 format_duration(recursive_prove_stats.median),
                 format_duration(warp_prove_stats.median),
+                format_warp_over_whir(warp_prove_stats.median, independent_prove_stats.median),
                 format_warp_over_whir(warp_prove_stats.median, recursive_prove_stats.median),
+                format_duration(independent_verify_stats.median),
                 format_duration(recursive_verify_stats.median),
                 format_duration(warp_verify_stats.median),
+                format_warp_over_whir(warp_verify_stats.median, independent_verify_stats.median),
                 format_warp_over_whir(warp_verify_stats.median, recursive_verify_stats.median),
+                independent_metrics.proof_bytes,
                 recursive_metrics.proof_bytes,
                 warp_metrics.proof_bytes,
                 recursive_bundle.recursive_mmcs_ops,
+            );
+            eprintln!(
+                "      Independent WHIR metrics: proof_bytes={} verifier_payload_bytes={} total_artifact_bytes={} commitments={} opening_claims={} whir_queries={} sumcheck_rounds={}",
+                independent_metrics.proof_bytes,
+                independent_metrics.verifier_payload_bytes,
+                independent_metrics.total_artifact_bytes,
+                independent_metrics.commitments,
+                independent_metrics.opening_claims,
+                independent_metrics.whir_queries,
+                independent_metrics.sumcheck_rounds,
             );
             eprintln!(
                 "      Recursive stats: public_inputs={} private_inputs={} native_whir_proofs={}",
@@ -3528,6 +3985,17 @@ fn print_recursive_whir_vs_warp_comparison(num_variable_cases: &[usize], n_value
                 warp_metrics.opening_claims,
                 warp_metrics.whir_queries,
                 warp_metrics.sumcheck_rounds,
+            );
+            eprintln!(
+                "      WARP size breakdown: root_proof={} chain_steps={} chain_step_proofs={} finalizer={} root_iop_proof={} root_iop_reduction={} root_iop_whir_opening={} final_instance={}",
+                warp_size_breakdown.root_proof_bytes,
+                warp_size_breakdown.chain_steps_bytes,
+                warp_size_breakdown.chain_step_proofs_bytes,
+                warp_size_breakdown.finalizer_bytes,
+                warp_size_breakdown.root_iop_proof_bytes,
+                warp_size_breakdown.root_iop_reduction_bytes,
+                warp_size_breakdown.root_iop_whir_opening_bytes,
+                warp_size_breakdown.instance_bytes,
             );
             if print_phases {
                 let recursive_verify_phases = recursive_verify_phases
@@ -3579,10 +4047,13 @@ fn print_recursive_whir_vs_warp_comparison(num_variable_cases: &[usize], n_value
                     outer_openings,
                     iterations,
                     warmup,
+                    independent_prove_stats,
                     recursive_prove_stats,
                     warp_prove_stats,
+                    independent_verify_stats,
                     recursive_verify_stats,
                     warp_verify_stats,
+                    independent_metrics,
                     recursive_metrics,
                     warp_metrics,
                     recursive_phases,
