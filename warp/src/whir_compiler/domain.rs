@@ -8,3 +8,6 @@
 
 /// Domain separator for base-message root-oracle commitments, `WARP_RBAS`.
 pub(super) const ROOT_WHIR_BASE_ORACLE: u64 = 0x5741_5250_5242_4153;
+
+/// Domain separator for extension-message root-oracle commitments, `WARP_REXT`.
+pub(super) const ROOT_WHIR_EXTENSION_ORACLE: u64 = 0x5741_5250_5245_5854;

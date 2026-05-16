@@ -257,9 +257,11 @@ where
 
 /// WHIR proof that a committed oracle satisfies a linear Sigma statement.
 ///
-/// The reduction first turns the linear claim into one residual opening
-/// `f(r) = v`; the ordinary WHIR PCS proof then binds that residual opening to
-/// the same Merkle commitment.
+/// The reduction first turns the linear claim into the residual query of a
+/// one-round linear-Sigma IOP. In the Construction 7.4 view, the residual
+/// value is checked by the polynomial-IOP verifier through answer arrays, and
+/// the WHIR proof binds those answers to the same Merkle commitment through
+/// WHIR's ordinary virtual-combination and constrained-RS proximity checks.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "F: Serialize + Send + Sync + Clone, EF: Serialize, MT::Commitment: Serialize, MT::Proof: Serialize",
@@ -267,9 +269,9 @@ where
 ))]
 pub struct WhirLinearSigmaProof<F: Send + Sync + Clone, EF, MT: Mmcs<F>> {
     /// Linear Sigma sumcheck reducing the public statement to one residual
-    /// opening.
+    /// query.
     pub reduction: LinearSigmaReductionProof<F, EF>,
-    /// WHIR PCS proof for the residual opening claim.
+    /// WHIR proof binding the residual query to the committed oracle.
     pub opening: WhirProof<F, EF, MT>,
 }
 
@@ -486,6 +488,18 @@ where
             dft,
             sumcheck_strategy,
         }
+    }
+
+    /// Number of variables in the initial multilinear polynomial committed by
+    /// this PCS.
+    pub fn num_variables(&self) -> usize {
+        self.config.num_variables
+    }
+
+    /// Logarithmic inverse rate of the initial Reed-Solomon oracle committed
+    /// by this PCS.
+    pub fn starting_log_inv_rate(&self) -> usize {
+        self.config.starting_log_inv_rate
     }
 
     /// Build the Fiat-Shamir domain separator for this protocol instance.

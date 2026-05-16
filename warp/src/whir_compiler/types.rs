@@ -74,37 +74,81 @@ pub enum NativeWarpWhirRootReductionError {
         /// Actual witness value count.
         actual: usize,
     },
+
+    /// The supplied WARP codeword is not the encoding of the WHIR message
+    /// committed for the same oracle.
+    #[error("root-IOP oracle {oracle_id} message does not encode to the supplied WARP codeword")]
+    EncodingMismatch {
+        /// Oracle id assigned by the root-IOP recorder.
+        oracle_id: usize,
+    },
 }
 
 /// WHIR commitment used by the native WARP root proof.
 ///
-/// All variants are message-domain commitments for the same WARP/WHIR
-/// Reed-Solomon code. WARP may record codeword openings, but those openings are
-/// compiled into linear claims over the committed message before WHIR proves
-/// them. There is intentionally no codeword-domain or limb commitment variant:
-/// keeping only these variants prevents the old double-RS and extension-limb
-/// fallback paths from re-entering the root proof.
+/// The variant names retain the historical "message" wording, but the public
+/// commitment is WHIR's commitment to the encoded initial RS oracle for that
+/// message. On the prover path, the supplied WARP codeword is checked against
+/// this RS encoding before commitment. Verifier soundness is still WHIR
+/// proximity/opening soundness until an external exact-codeword bridge
+/// identifies the full committed table with that encoding. For base variants,
+/// the source-WARP projection additionally needs the alphabet fact that the
+/// committed table is `F`-valued; WHIR over an extension field does not prove
+/// that by itself. WARP may record codeword openings; those openings are
+/// compiled into linear claims over the committed message representation before
+/// WHIR proves them. The
+/// [`Self::warp_mmcs_root`] projection is only the commitment-link boundary.
+/// A source-WARP projection additionally needs MMCS binding plus an
+/// exact-codeword bridge before the native root transcript can be compared
+/// with WARP's source-paper `MT.Commit`/`MT.Open` transcript.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(bound(serialize = "Comm: Serialize", deserialize = "Comm: Deserialize<'de>"))]
 pub enum NativeWarpWhirRootCommitment<Comm> {
-    /// Base-field fresh message committed by WHIR; WARP codeword openings are
-    /// compiled into linear Sigma claims over this message to avoid RS
-    /// double-encoding.
+    /// Base-field fresh oracle committed by WHIR after one RS encoding.
     BaseMessage(Comm),
-    /// Base-field fresh message committed as one column of a shared WHIR/MMCS
-    /// batch root.
+    /// Base-field fresh oracle committed as one column of a shared WHIR/MMCS
+    /// batch root after one RS encoding.
+    ///
+    /// The root is the source-WARP stack commitment for the whole width-`width`
+    /// row-valued table. It is not a per-column commitment to this oracle
+    /// alone; `column` selects this logical oracle inside the shared root.
     BaseMessageShared {
         root: Comm,
         column: usize,
         width: usize,
     },
-    /// Extension-field accumulator message committed by WHIR; WARP codeword
-    /// openings are compiled into linear Sigma claims over this message to
-    /// avoid RS double-encoding.
+    /// Extension-field accumulator oracle committed by WHIR after one RS
+    /// encoding.
     ExtensionMessage(Comm),
 }
 
 impl<Comm> NativeWarpWhirRootCommitment<Comm> {
+    /// Return the underlying MMCS root used by the WARP transcript.
+    ///
+    /// The native root proof carries extra metadata for shared base roots, but
+    /// the Merkle/MMCS object observed by WARP is always this projected root.
+    /// For [`Self::BaseMessageShared`], this is the shared stack root for all
+    /// columns, and callers must also bind [`Self::shared_base_position`] so
+    /// the selected column inside that shared root is fixed.
+    pub fn warp_mmcs_root(&self) -> &Comm {
+        match self {
+            Self::BaseMessage(commitment)
+            | Self::BaseMessageShared {
+                root: commitment, ..
+            }
+            | Self::ExtensionMessage(commitment) => commitment,
+        }
+    }
+
+    /// Return `(column, width)` for a base oracle committed as one column of a
+    /// shared MMCS root.
+    pub const fn shared_base_position(&self) -> Option<(usize, usize)> {
+        match self {
+            Self::BaseMessageShared { column, width, .. } => Some((*column, *width)),
+            Self::BaseMessage(_) | Self::ExtensionMessage(_) => None,
+        }
+    }
+
     pub(super) fn observe_payload_into<F, Challenger>(&self, challenger: &mut Challenger)
     where
         F: Field + PrimeCharacteristicRing,
@@ -145,7 +189,7 @@ where
     pub prover_data: WhirDeferredProverData<F, EF, MT, DIGEST_ELEMS>,
     /// Challenger state immediately after the deferred commitment phase.
     pub challenger: Challenger,
-    /// RS message committed by WHIR.
+    /// Message representation whose WHIR encoding is the committed RS oracle.
     pub message: Vec<F>,
 }
 
@@ -163,7 +207,7 @@ where
     pub column: usize,
     /// Total number of columns in the shared batch.
     pub width: usize,
-    /// Message committed in this column.
+    /// Message representation whose WHIR encoding is committed in this column.
     pub message: Vec<F>,
 }
 
@@ -179,7 +223,8 @@ where
     pub prover_data: WhirExtensionDeferredProverData<F, EF, MT, DIGEST_ELEMS>,
     /// Challenger state immediately after the deferred commitment phase.
     pub challenger: Challenger,
-    /// Systematic accumulator message committed by WHIR.
+    /// Systematic accumulator message whose WHIR encoding is the committed RS
+    /// oracle.
     pub message: Vec<EF>,
 }
 
@@ -230,36 +275,55 @@ where
     pub data: NativeWarpWhirRootProverData<F, EF, MT, Challenger, DIGEST_ELEMS>,
 }
 
-/// One WHIR proof authenticating the batched root-IOP opening.
+/// One precommitted WHIR proof authenticating the batched root-IOP residual
+/// query.
 ///
-/// `reduction` combines all WARP root claims over all message-domain oracles to
-/// one virtual same-point opening. The `opening` proof is WHIR's grouped
-/// batched-initial proof against the original per-oracle roots.
+/// `reduction` combines all WARP root claims after lowering them to
+/// message-domain linear statements. In the WHIR source-theorem view, its
+/// residual claim is the `V_poly` decision over per-slot answer arrays. The
+/// `opening` proof is WHIR's precommitted linear-Sigma proof against the
+/// original encoded RS-oracle roots, including WHIR's own virtual-combination
+/// and constrained-RS proximity checks. The proof gives WHIR
+/// proximity/opening soundness; it does not by itself prove that the entire
+/// committed MMCS table is entrywise equal to the extracted RS codeword.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "F: Serialize + serde::de::DeserializeOwned + Send + Sync + Clone, EF: Serialize + serde::de::DeserializeOwned, MT::Commitment: Serialize + serde::de::DeserializeOwned, MT::Proof: Serialize + serde::de::DeserializeOwned",
     deserialize = "F: Serialize + serde::de::DeserializeOwned + Send + Sync + Clone, EF: Serialize + serde::de::DeserializeOwned, MT::Commitment: Serialize + serde::de::DeserializeOwned, MT::Proof: Serialize + serde::de::DeserializeOwned"
 ))]
 pub struct NativeWarpWhirRootBatchedOpeningProof<F: Send + Sync + Clone, EF, MT: Mmcs<F>> {
-    /// Multi-oracle linear-Sigma reduction of residual claims to one virtual
-    /// opening.
+    /// Multi-oracle linear-Sigma reduction of residual claims to the
+    /// polynomial-IOP `V_poly` residual query.
     pub reduction: BatchedLinearSigmaReductionProof<F, EF>,
-    /// Batched WHIR proof for the virtual opening against all original roots.
+    /// Precommitted WHIR proof for the virtual residual query against all
+    /// original roots.
     pub opening: WhirProof<F, EF, MT>,
 }
 
-/// Complete native WARP root proof backed by one WHIR batched opening.
+/// Native WARP linear-opening root proof backed by one precommitted WHIR
+/// residual proof.
+///
+/// This proof authenticates the recorded linear oracle-opening claims. It is
+/// not a complete terminal WARP decider proof; the nonlinear PESAT equation is
+/// checked by a separate finalizer. It also does not supply the exact-codeword
+/// bridge needed to project WHIR proximity extraction to WARP's exact
+/// source-paper `MT.Commit`/`MT.Open` transcript; that projection is valid only
+/// outside MMCS binding failure and exact-codeword bridge failure.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "F: Serialize + serde::de::DeserializeOwned + Send + Sync + Clone, EF: Serialize + serde::de::DeserializeOwned, MT::Commitment: Serialize + serde::de::DeserializeOwned, MT::Proof: Serialize + serde::de::DeserializeOwned",
     deserialize = "F: Serialize + serde::de::DeserializeOwned + Send + Sync + Clone, EF: Serialize + serde::de::DeserializeOwned, MT::Commitment: Serialize + serde::de::DeserializeOwned, MT::Proof: Serialize + serde::de::DeserializeOwned"
 ))]
 pub struct NativeWarpWhirRootProof<F: Send + Sync + Clone, EF, MT: Mmcs<F>> {
-    /// Direct batched root proof for message-domain WARP roots.
+    /// Direct batched root proof for WARP roots backed by WHIR encoded RS
+    /// oracles.
     pub opening: NativeWarpWhirRootBatchedOpeningProof<F, EF, MT>,
 }
 
-/// Errors from the complete native WARP root proof.
+/// Explicit alias for the linear-opening role of [`NativeWarpWhirRootProof`].
+pub type NativeWarpWhirLinearOpeningProof<F, EF, MT> = NativeWarpWhirRootProof<F, EF, MT>;
+
+/// Errors from the native WARP linear-opening root proof.
 #[derive(Debug, Error)]
 pub enum NativeWarpWhirRootProofError {
     /// The root reduction layer failed.

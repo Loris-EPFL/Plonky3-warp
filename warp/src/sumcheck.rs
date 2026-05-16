@@ -1,8 +1,8 @@
 //! Coefficient-form sumcheck proof + transcript helpers.
 //!
 //! WARP runs two sumchecks: the §6.3 twin-constraint sumcheck of degree
-//! `1 + max{log n + 1, log M + d}`, and the §8.2 multilinear-batching
-//! sumcheck of degree 2. Both are encoded the same way:
+//! `1 + max{log_codeword_len + 1, log_constraints + d}`, and the §8.2
+//! multilinear-batching sumcheck of degree 2. Both are encoded the same way:
 //!
 //! - Each round the prover sends the round polynomial `h_j(X)` as
 //!   coefficients `[c_0, c_1, …, c_D]` (so `h_j(X) = Σ c_k · X^k`).

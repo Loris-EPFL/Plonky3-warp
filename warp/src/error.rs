@@ -21,7 +21,7 @@ pub enum VerifierError {
     },
 
     /// The §6.3 final-claim oracle check failed:
-    /// `h_last(γ_last) != eq(τ, γ) · (ν₀ + ω · η)`.
+    /// `h_last(γ_last) != eq(τ_selector, γ) · (ν₀ + ω · η)`.
     #[error("twin-constraint final claim mismatch")]
     TwinConstraintFinalClaim,
 

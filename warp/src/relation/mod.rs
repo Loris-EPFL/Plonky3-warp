@@ -2,16 +2,17 @@
 //!
 //! WARP is an accumulation scheme for the **PESAT** relation
 //! (polynomial equation satisfiability) of [WARP, Definition 5.1].
-//! A PESAT system is a tuple `(p̂, M, N, k)` where `p̂ = (p̂_1, …, p̂_M)`
-//! is a list of constant-degree polynomials in `N` variables, with `k`
-//! of those variables forming the witness and `κ = N − k` forming the
-//! explicit instance.
+//! A PESAT system is WARP's tuple `(p̂, M, N, k)`. To avoid overloading the
+//! Reed-Solomon dimensions used elsewhere in the code, this module calls the
+//! constraint count `M_pesat = M`: `p̂ = (p̂_1, …, p̂_M_pesat)` is a list of
+//! constant-degree polynomials in `N` variables, with `k` of those variables
+//! forming the witness and `κ = N − k` forming the explicit instance.
 //!
 //! The protocol only ever interacts with PESAT through the **bundling**
 //! polynomial (Definition 5.5):
 //!
 //! ```text
-//!     Pb(τ, z) = Σ_{i ∈ {0,1}^{log M}} eq(τ, i) · p̂_i(z)
+//!     Pb(τ, z) = Σ_{i ∈ {0,1}^{log_constraints}} eq(τ, i) · p̂_i(z)
 //! ```
 //!
 //! Hence the trait surface required by WARP reduces to two methods:
@@ -38,8 +39,10 @@ pub use claim_6_5::{Claim65Scratch, eq_dot_q_recursive, poly_lerp_via_linear};
 /// Shape parameters of a PESAT instance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PesatShape {
-    /// `log_2 M` where `M` is the number of bundled constraints (must be a
-    /// power of two; pad with zero-constraints if necessary).
+    /// `log_2 M_pesat`, where `M_pesat` is the number of bundled PESAT
+    /// constraints (must be a power of two; pad with zero constraints if
+    /// necessary). This is independent of the RS message dimension and the
+    /// codeword MLE dimension.
     pub log_constraints: usize,
     /// `log_2 k` where `k` is the witness length (must be a power of two).
     pub log_witness: usize,
@@ -51,7 +54,8 @@ pub struct PesatShape {
 }
 
 impl PesatShape {
-    /// Number of bundled constraints `M = 2^{log_constraints}`.
+    /// Number of bundled PESAT constraints
+    /// `M_pesat = 2^{log_constraints}`.
     #[inline]
     pub const fn num_constraints(&self) -> usize {
         1 << self.log_constraints
@@ -69,8 +73,8 @@ impl PesatShape {
         self.explicit_len + self.witness_len()
     }
 
-    /// Length `m = log M + κ` of the per-instance `β` vector
-    /// (the bundling τ part plus the explicit instance part).
+    /// Length `log_constraints + κ` of the per-instance `β` vector
+    /// (the bundling `τ` part plus the explicit instance part).
     #[inline]
     pub const fn beta_len(&self) -> usize {
         self.log_constraints + self.explicit_len
@@ -87,8 +91,8 @@ pub trait BundledPesat<F: Field, EF: ExtensionField<F>>: Sync + Send {
 
     /// Evaluate `Pb(τ, z) = Σ_i eq(τ, i) · p̂_i(z)` at a single point.
     ///
-    /// - `tau_eq` is the precomputed eq-table `[eq(τ, i) : i ∈ [0, M)]`,
-    ///   length `M`.
+    /// - `tau_eq` is the precomputed eq-table
+    ///   `[eq(τ, i) : i ∈ [0, M_pesat)]`, length `M_pesat`.
     /// - `z = (x, w)` is the full assignment, length `N = κ + k`.
     fn evaluate_bundled(&self, tau_eq: &[EF], z: &[EF]) -> EF;
 
@@ -99,23 +103,24 @@ pub trait BundledPesat<F: Field, EF: ExtensionField<F>>: Sync + Send {
     ///     b_x(α) = (1 − α) · b_x_lo + α · b_x_hi   (length κ)
     ///     w(α)   = (1 − α) · w_lo  + α · w_hi      (length k)
     /// ```
-    /// and return `M` polynomials in `α` (one per constraint), each in
-    /// coefficient form of length `max_degree + 1`. The `c`-th entry is
+    /// and return `M_pesat` polynomials in `α` (one per constraint), each
+    /// in coefficient form of length `max_degree + 1`. The `c`-th entry is
     /// the polynomial `α ↦ p̂_c(b_x(α), w(α))`.
     ///
     /// **Indexing**. The `c`-th polynomial corresponds to the same constraint
-    /// index `c ∈ [0, M)` that [`evaluate_bundled`](Self::evaluate_bundled)
-    /// weights with `tau_eq[c]`. Implementors must keep the orderings in
-    /// lock-step.
+    /// index `c ∈ [0, M_pesat)` that
+    /// [`evaluate_bundled`](Self::evaluate_bundled) weights with
+    /// `tau_eq[c]`. Implementors must keep the orderings in lock-step.
     ///
     /// # Why this is on the trait
     ///
     /// This is the inner-loop kernel of the optimal §6.3 prover (paper
     /// Lemma 6.4): given per-constraint polys, the prover applies
     /// [`eq_dot_q_recursive`] (Claim 6.5) to compute
-    /// `Σ_c eq(B_τ(X), c) · p̂_c(B_x(X), W(X))` in `O(M · d)` time, vs
-    /// `O(M · d · log M)` for the naive "evaluate at `D + 1` points then
-    /// Lagrange-interpolate" pattern previously used by the default impl.
+    /// `Σ_c eq(B_τ(X), c) · p̂_c(B_x(X), W(X))` in
+    /// `O(M_pesat · d)` time, vs `O(M_pesat · d · log_constraints)` for the
+    /// naive "evaluate at `D + 1` points then Lagrange-interpolate" pattern
+    /// previously used by the default impl.
     ///
     /// # Panics
     ///
@@ -140,20 +145,20 @@ pub trait BundledPesat<F: Field, EF: ExtensionField<F>>: Sync + Send {
     /// ```
     ///
     /// in `X`, where:
-    /// - `B(X) = (1−X)·b_lo + X·b_hi` of length `log M + κ`
-    /// - `B_τ(X)` is the first `log M` coordinates (the bundling τ)
+    /// - `B(X) = (1−X)·b_lo + X·b_hi` of length `log_constraints + κ`
+    /// - `B_τ(X)` is the first `log_constraints` coordinates (the bundling τ)
     /// - `B_x(X)` is the remaining `κ` coordinates (the explicit instance)
     /// - `W(X) = (1−X)·w_lo + X·w_hi` of length `k`
     ///
-    /// Returned vector has length `1 + log M + d` (the polynomial degree
-    /// plus one), in coefficient form `[c_0, c_1, …, c_D]` so that
+    /// Returned vector has length `1 + log_constraints + d` (the polynomial
+    /// degree plus one), in coefficient form `[c_0, c_1, …, c_D]` so that
     /// `Q(X) = Σ_j c_j · X^j`.
     ///
     /// # Default impl: paper Lemma 6.4 / Claim 6.5
     ///
     /// The default impl combines [`iter_constraint_polys_at_lerp`] with
-    /// [`eq_dot_q_recursive`] for `O(M · d)` cost. Implementors that have a
-    /// faster bespoke kernel can override.
+    /// [`eq_dot_q_recursive`] for `O(M_pesat · d)` cost. Implementors that
+    /// have a faster bespoke kernel can override.
     ///
     /// # Panics
     ///
@@ -192,7 +197,7 @@ pub trait BundledPesat<F: Field, EF: ExtensionField<F>>: Sync + Send {
     /// Maximum degree of the `Q(X)` polynomial returned by
     /// [`bundled_round_poly`](Self::bundled_round_poly).
     ///
-    /// Equal to `log M + d` for the standard `eq`-zero-evader.
+    /// Equal to `log_constraints + d` for the standard `eq`-zero-evader.
     #[inline]
     fn round_poly_degree(&self) -> usize {
         let s = self.shape();
@@ -202,19 +207,20 @@ pub trait BundledPesat<F: Field, EF: ExtensionField<F>>: Sync + Send {
 
 /// Default `bundled_round_poly` impl: Lemma 6.4 / Claim 6.5 algorithm.
 ///
-/// Splits `B(X)` into `B_τ(X)` (the first `log M` coordinates) and `B_x(X)`
-/// (the remaining `κ` coordinates), invokes
+/// Splits `B(X)` into `B_τ(X)` (the first `log_constraints` coordinates) and
+/// `B_x(X)` (the remaining `κ` coordinates), invokes
 /// [`BundledPesat::iter_constraint_polys_at_lerp`] to get per-constraint
 /// polys in `α`, then folds them with `B_τ(X)` via
 /// [`eq_dot_q_recursive`] (Claim 6.5).
 ///
-/// Cost: `O(M · d)` field ops plus the cost of one
-/// `iter_constraint_polys_at_lerp` call (`O(d · |p̂| · M)` for the typical
-/// "evaluate at `d + 1` points + Lagrange-interpolate per constraint" impl).
+/// Cost: `O(M_pesat · d)` field ops plus the cost of one
+/// `iter_constraint_polys_at_lerp` call (`O(d · |p̂| · M_pesat)` for the
+/// typical "evaluate at `d + 1` points + Lagrange-interpolate per constraint"
+/// impl).
 ///
 /// # Panics
 ///
-/// - `b_lo.len() == b_hi.len() == log M + κ`.
+/// - `b_lo.len() == b_hi.len() == log_constraints + κ`.
 /// - `w_lo.len() == w_hi.len() == k`.
 pub fn default_round_poly_via_claim_6_5<P, F, EF>(
     pesat: &P,
@@ -229,7 +235,7 @@ where
     EF: ExtensionField<F>,
 {
     let shape = pesat.shape();
-    let log_m = shape.log_constraints;
+    let log_constraints = shape.log_constraints;
     let k = shape.witness_len();
 
     assert_eq!(b_lo.len(), shape.beta_len(), "b_lo length");
@@ -237,16 +243,21 @@ where
     assert_eq!(w_lo.len(), k, "w_lo length");
     assert_eq!(w_hi.len(), k, "w_hi length");
 
-    // Split B(X) into B_τ(X) (first log_m) and B_x(X) (remaining κ).
-    let (b_tau_lo, b_x_lo) = b_lo.split_at(log_m);
-    let (b_tau_hi, b_x_hi) = b_hi.split_at(log_m);
+    // Split B(X) into B_tau(X) and B_x(X). The tau prefix has
+    // `log_constraints` coordinates, independent of the RS dimensions.
+    let (b_tau_lo, b_x_lo) = b_lo.split_at(log_constraints);
+    let (b_tau_hi, b_x_hi) = b_hi.split_at(log_constraints);
 
-    // Per-constraint polys in α (M polys, each degree d).
+    // Per-constraint polys in alpha (M_pesat polys, each degree d).
     let constraint_polys = pesat.iter_constraint_polys_at_lerp(b_x_lo, b_x_hi, w_lo, w_hi);
-    debug_assert_eq!(constraint_polys.len(), 1usize << log_m, "M polys expected");
+    debug_assert_eq!(
+        constraint_polys.len(),
+        1usize << log_constraints,
+        "M_pesat polys expected"
+    );
 
-    // Build B_τ(X) as `log_m` linear polys [b_τ_lo[j], b_τ_hi[j] − b_τ_lo[j]],
-    // matching the encoding `eq_dot_q_recursive` consumes.
+    // Build B_tau(X) as `log_constraints` linear polys, matching the encoding
+    // `eq_dot_q_recursive` consumes.
     let b_tau_linears: Vec<[EF; 2]> = b_tau_lo
         .iter()
         .zip(b_tau_hi.iter())
@@ -262,9 +273,9 @@ where
 ///
 /// # Cost
 ///
-/// `O(D²)` field operations per call. For our typical `D ≈ log M + d`
-/// (around 25 for `M = 2^20`, `d = 5`) this is negligible compared to
-/// the per-point evaluation cost.
+/// `O(D²)` field operations per call. For our typical
+/// `D ≈ log_constraints + d` (around 25 for `M_pesat = 2^20`, `d = 5`) this
+/// is negligible compared to the per-point evaluation cost.
 ///
 /// # Panics
 ///

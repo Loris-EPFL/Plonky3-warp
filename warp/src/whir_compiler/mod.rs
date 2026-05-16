@@ -5,31 +5,55 @@
 //! level: WARP evaluation obligations are converted into WHIR linear
 //! Sigma-IOP constraints rather than into PCS opening calls.
 //!
-//! The main invariant is that WARP and WHIR refer to the same Reed-Solomon
-//! oracle. WARP's root IOP records obligations such as "open `u = C(w)` at
-//! index `i`" or "open the accumulator MLE at `alpha`". This compiler rewrites
-//! those obligations as WHIR linear-Sigma constraints over the committed RS
-//! message whenever possible:
+//! The main invariant is that WARP and WHIR refer to one Reed-Solomon codeword
+//! per oracle. WARP's root IOP records obligations such as "open `u = C(w)` at
+//! index `i`" or "open the accumulator MLE at `alpha`". WHIR commits to the
+//! encoded initial RS oracle for the same `w`, and this compiler rewrites WARP
+//! obligations as WHIR linear-Sigma constraints over the committed message
+//! representation whenever possible:
 //!
-//! - fresh base WARP inputs use `w = C^{-1}(u)` directly, so WHIR does not
-//!   re-encode the already encoded codeword `u`;
+//! - fresh base WARP inputs must satisfy `u = C(w)` before WHIR commits;
 //! - accumulator codeword-MLE claims use the adjoint weights of the same RS
 //!   encoder;
 //! - all touched oracle commitments are absorbed before reduction challenges
 //!   are sampled.
 //!
-//! The proof-system half of this module proves the whole root IOP with one
-//! compact batched WHIR opening. Older codeword-domain and limb fallback paths
-//! were removed so every root proof uses the same WARP/WHIR RS code.
+//! This is a prover-side invariant and a proximity-sound verifier statement,
+//! not an exact full-table equality theorem. WHIR proves proximity/opening
+//! soundness for the committed RS oracle. A reduction that wants to invoke
+//! WARP's exact source-paper `MT.Commit`/`MT.Open` transcript must first pass
+//! through the source-WARP projection bridge: outside MMCS binding failure, an
+//! exact-codeword bridge must identify the full committed table with `C(w)`.
+//! For base WARP slots, that bridge also relies on the alphabet condition that
+//! the committed table is genuinely `F`-valued, not merely an extension-field
+//! RS word extracted by WHIR over `EF`. The native API enforces this on the
+//! prover path by committing base oracles through `Mmcs<F>` data; an untyped
+//! extension-only commitment would need a separate subfield proof.
 //!
-//! Soundness note: "one compact batched WHIR opening" means one WHIR proof
-//! object after WARP has batched its claims. That proof still executes WHIR's
-//! ordinary constrained-RS protocol internally: initial folding, every
-//! configured intermediate STIR/proximity round, OOD/query-combination checks,
-//! and the final folding phase. The WARP root compiler relies on those WHIR
-//! round-by-round errors for proximity/opening soundness; the WARP-specific
-//! sumcheck only reduces the recorded `VACC`/`DACC` claims to the grouped
-//! residual statement proved by WHIR.
+//! The proof-system half of this module proves the recorded linear
+//! oracle-opening part of the root IOP with one precommitted WHIR
+//! linear-Sigma residual proof.
+//! It does not prove the nonlinear terminal PESAT equation
+//! `Pb(beta, w) = eta`; that belongs to the configured WARP finalizer. Older
+//! codeword-domain and limb fallback paths were removed so every linear-root
+//! proof uses the same WARP/WHIR RS code.
+//!
+//! Soundness note: "one precommitted WHIR linear-Sigma residual proof" means
+//! one WHIR proof object after WARP has batched its claims and after the
+//! underlying RS-oracle roots were already bound. In the source-theorem view,
+//! this is a one-round linear-Sigma IOP with per-slot answer arrays `A_a[...]`
+//! and a `V_poly` check of the residual sum; WHIR then samples its own
+//! combination challenge and proximity-tests the virtual combination of the
+//! committed oracles. It is a precommitted specialization of WHIR's
+//! linear-Sigma compiler, not a new PCS-style opening theorem. The proof still
+//! executes WHIR's ordinary constrained-RS protocol internally: initial
+//! folding, every configured intermediate STIR/proximity round,
+//! OOD/query-combination checks, and the final folding phase. The WARP root
+//! compiler relies on those WHIR round-by-round errors for proximity/opening
+//! soundness; the WARP-specific sumcheck only reduces the recorded linear
+//! opening claims to the `V_poly` residual query supplied to WHIR. It does not,
+//! by itself, certify entrywise equality between the full MMCS table and the
+//! extracted nearby RS codeword.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -70,14 +94,16 @@ mod domain;
 
 mod types;
 pub use types::{
-    NativeWarpWhirClaimCompileError, NativeWarpWhirRootBaseProverData,
-    NativeWarpWhirRootBatchedOpeningProof, NativeWarpWhirRootCommitment,
-    NativeWarpWhirRootExtensionProverData, NativeWarpWhirRootOracleProverData,
-    NativeWarpWhirRootProof, NativeWarpWhirRootProofError, NativeWarpWhirRootProverData,
-    NativeWarpWhirRootReductionError, NativeWarpWhirRootSharedBaseProverData,
+    NativeWarpWhirClaimCompileError, NativeWarpWhirLinearOpeningProof,
+    NativeWarpWhirRootBaseProverData, NativeWarpWhirRootBatchedOpeningProof,
+    NativeWarpWhirRootCommitment, NativeWarpWhirRootExtensionProverData,
+    NativeWarpWhirRootOracleProverData, NativeWarpWhirRootProof, NativeWarpWhirRootProofError,
+    NativeWarpWhirRootProverData, NativeWarpWhirRootReductionError,
+    NativeWarpWhirRootSharedBaseProverData,
 };
 
-/// Native WARP root proof system using WHIR over the WARP RS message.
+/// Native WARP linear-opening root proof system using WHIR over the same RS
+/// oracle as WARP.
 pub struct NativeWarpWhirRootProofSystem<'a, F, EF, MT, Challenger, Dft, const DIGEST_ELEMS: usize>
 where
     F: TwoAdicField,
@@ -85,7 +111,7 @@ where
     MT: Mmcs<F>,
     Dft: TwoAdicSubgroupDft<F>,
 {
-    /// WHIR PCS configured for the RS-message-domain openings.
+    /// WHIR PCS configured for the WARP message length and RS rate.
     message_pcs: &'a WhirPcs<EF, F, MT, Challenger, Dft, DIGEST_ELEMS>,
     /// Algebraic compiler from WARP root claims to WHIR linear-Sigma claims.
     compiler: NativeWarpWhirCompiler<'a, F, Dft>,
@@ -93,16 +119,41 @@ where
     challenger_seed: Challenger,
 }
 
+/// Explicit alias for the linear-opening role of
+/// [`NativeWarpWhirRootProofSystem`].
+///
+/// The historical type name is kept for compatibility. This alias documents
+/// the security boundary: the WHIR compiler authenticates linear opening
+/// claims, while the terminal PESAT equation is handled by a finalizer.
+pub type NativeWarpWhirLinearOpeningProofSystem<
+    'a,
+    F,
+    EF,
+    MT,
+    Challenger,
+    Dft,
+    const DIGEST_ELEMS: usize,
+> = NativeWarpWhirRootProofSystem<'a, F, EF, MT, Challenger, Dft, DIGEST_ELEMS>;
+
 mod statement;
 pub use statement::{NativeWarpWhirEvalClaim, NativeWarpWhirOracleStatement};
 
 /// Compiler helper for WARP over Plonky3's Reed-Solomon code.
 ///
 /// WARP's RS specialization and WHIR's initial oracle are both statements
-/// about one smooth Reed-Solomon code. This compiler therefore works in the
-/// message coordinates of `C^{-1}` and uses [`ReedSolomonCode`] to express
-/// every WARP codeword query as an RS query over that same initial polynomial.
-/// In coefficient layout those weights are WHIR select/monomial weights; in
+/// about one smooth Reed-Solomon code. This compiler works in the message
+/// representation `w` whose encoded oracle is `C(w)`, and uses
+/// [`ReedSolomonCode`] to express every WARP codeword query as a linear query
+/// over that same initial polynomial. The source-paper proof states this in
+/// WHIR's Boolean multilinear basis; this implementation may store `w` in
+/// coefficient or systematic coordinates, so the returned weights are already
+/// transported through the corresponding coordinate map.
+///
+/// The compiler deliberately exposes only the linear/proximity part. Exact
+/// equality between a verifier's full committed table and the RS codeword
+/// selected by WHIR extraction is an external bridge condition, not a
+/// consequence of compiling the claims.
+/// In coefficient layout those are coefficient-coordinate weights; in
 /// systematic layout they are the corresponding Lagrange weights on the
 /// message subgroup. No second code is introduced.
 pub struct NativeWarpWhirCompiler<'a, F, Dft>
@@ -179,8 +230,9 @@ where
     /// linear-Sigma constraint.
     ///
     /// In systematic mode, the witness/message MLE point `y` is lifted to the
-    /// codeword point `(y, 0, ..., 0)`. This is the bridge needed for WARP's
-    /// final `Pb(beta, C^{-1}(f)) = eta` constraint.
+    /// codeword point `(y, 0, ..., 0)`. This is useful for terminal opening
+    /// claims emitted by finalizer sumchecks. It does not by itself prove the
+    /// nonlinear PESAT equation `Pb(beta, C^{-1}(f)) = eta`.
     ///
     /// # Panics
     ///
@@ -352,14 +404,25 @@ where
     /// Create a native WARP root proof system.
     ///
     /// `message_pcs` must be configured with `code.log_msg_len()` variables
-    /// and the same RS rate/security settings as the WARP code. WHIR commits to
-    /// `C^{-1}(u)`, and WARP codeword openings are compiled using the same
-    /// [`ReedSolomonCode`] generator.
+    /// and the same RS rate as the WARP code. WHIR commits to the encoded RS
+    /// oracle for `w`, and WARP codeword openings are compiled using the same
+    /// [`ReedSolomonCode`] generator. Verifier soundness remains WHIR
+    /// proximity soundness unless an exact-codeword bridge is supplied.
     pub fn new(
         message_pcs: &'a WhirPcs<EF, F, MT, Challenger, Dft, DIGEST_ELEMS>,
         code: &'a ReedSolomonCode<F, Dft>,
         challenger_seed: Challenger,
     ) -> Self {
+        assert_eq!(
+            message_pcs.num_variables(),
+            code.log_msg_len(),
+            "WHIR variable count must match WARP RS message dimension",
+        );
+        assert_eq!(
+            message_pcs.starting_log_inv_rate(),
+            code.log_inv_rate(),
+            "WHIR starting inverse rate must match WARP RS code",
+        );
         Self {
             message_pcs,
             compiler: NativeWarpWhirCompiler::new(code),
@@ -367,13 +430,17 @@ where
         }
     }
 
-    /// Commit a base-field fresh WARP input without RS double-encoding.
+    /// Commit a base-field fresh WARP input with one shared RS encoding.
     ///
-    /// The WARP verifier still sees and checks openings of `codeword = C(w)`,
-    /// but the WHIR commitment is to `w = C^{-1}(codeword)`. During proof
-    /// generation those codeword-index claims are transformed into
-    /// constrained-RS claims over the same message coordinates by
-    /// [`ReedSolomonCode::codeword_index_weights`].
+    /// The supplied `codeword` must equal `C(message)` on the prover side.
+    /// WHIR then commits to its encoded initial oracle for `message`. During
+    /// proof generation, codeword-index claims are transformed into
+    /// constrained-RS claims over the same message representation. The verifier
+    /// still relies on WHIR proximity plus the source-WARP projection bridge
+    /// required before applying WARP's exact `MT.Commit`/`MT.Open` theorem. In
+    /// particular, the base-field alphabet condition comes from using an
+    /// `F`-valued base commitment, not from WHIR's extension-field proximity
+    /// extraction alone.
     pub fn commit_base_message_oracle(
         &self,
         oracle_id: usize,
@@ -406,6 +473,7 @@ where
                 .into(),
             );
         }
+        self.ensure_base_codeword_matches_message(oracle_id, &codeword, &message)?;
         let mut challenger = self.base_oracle_challenger(oracle_id);
         let (commitment, prover_data) = self
             .message_pcs
@@ -430,9 +498,12 @@ where
 
     /// Commit several base-field fresh WARP inputs under one WHIR/MMCS root.
     ///
-    /// Each returned root-IOP commitment carries the same Merkle root plus a
-    /// distinct column index. The column index is part of the Fiat-Shamir
-    /// payload, so swapping columns changes the transcript.
+    /// The shared root authenticates the whole ordered stack of base RS
+    /// oracles. Each returned root-IOP commitment carries that same Merkle root
+    /// plus a distinct column index. The column index is part of the
+    /// Fiat-Shamir payload, so swapping columns changes the transcript. A
+    /// source-WARP projection must treat this root as the stack commitment, not
+    /// as `MT.Commit` applied independently to each column.
     pub fn commit_shared_base_message_oracles(
         &self,
         inputs: Vec<(usize, Vec<F>, Vec<F>)>,
@@ -470,6 +541,7 @@ where
                     .into(),
                 );
             }
+            self.ensure_base_codeword_matches_message(*oracle_id, codeword, message)?;
             matrices.push(RowMajorMatrix::new(message.clone(), 1));
         }
 
@@ -519,9 +591,10 @@ where
 
     /// Commit an extension-field accumulator codeword for the WARP root IOP.
     ///
-    /// The codeword is decoded back to the RS message before commitment, so
-    /// this helper keeps the single-RS invariant even when callers only have
-    /// the current accumulator codeword available.
+    /// The codeword is decoded back to the RS message and re-encoded before
+    /// commitment. Non-codewords are rejected by this prover API. The verifier
+    /// side still gets WHIR proximity/opening soundness; exact full-table
+    /// equality is a separate bridge condition.
     pub fn commit_extension_oracle(
         &self,
         oracle_id: usize,
@@ -544,17 +617,61 @@ where
             );
         }
 
-        let challenger = self.base_oracle_challenger(oracle_id);
         let message = self.compiler.code().message_from_codeword(&codeword);
+        self.commit_extension_oracle_with_message(oracle_id, codeword, message)
+    }
+
+    /// Commit an extension-field accumulator when both the WARP codeword and
+    /// its RS message representation are already available.
+    ///
+    /// This is the fast path for accumulation code that already carries
+    /// `w_merged` alongside `f_merged = C(w_merged)`: it avoids decoding from
+    /// the codeword, but still enforces the single-RS invariant before WHIR
+    /// commits.
+    pub fn commit_extension_oracle_with_message(
+        &self,
+        oracle_id: usize,
+        codeword: Vec<EF>,
+        message: Vec<EF>,
+    ) -> Result<
+        (
+            RootIopBoundCommitment<NativeWarpWhirRootCommitment<MT::Commitment>>,
+            NativeWarpWhirRootOracleProverData<F, EF, MT, Challenger, DIGEST_ELEMS>,
+        ),
+        NativeWarpWhirRootProofError,
+    > {
+        if codeword.len() != self.compiler.code().codeword_len() {
+            return Err(
+                NativeWarpWhirRootReductionError::OracleValueLengthMismatch {
+                    oracle_id,
+                    expected: self.compiler.code().codeword_len(),
+                    actual: codeword.len(),
+                }
+                .into(),
+            );
+        }
+        if message.len() != self.compiler.code().msg_len() {
+            return Err(
+                NativeWarpWhirRootReductionError::OracleValueLengthMismatch {
+                    oracle_id,
+                    expected: self.compiler.code().msg_len(),
+                    actual: message.len(),
+                }
+                .into(),
+            );
+        }
+        self.ensure_extension_codeword_matches_message(oracle_id, &codeword, &message)?;
+        let challenger = self.extension_oracle_challenger(oracle_id);
         self.commit_extension_message_oracle_with_challenger(oracle_id, message, challenger)
     }
 
     /// Commit an extension-field accumulator through WHIR's initial-message
     /// oracle path when the RS message is already available.
     ///
-    /// This commits to the same WHIR polynomial as [`commit_extension_oracle`]
-    /// would after `message_from_codeword`, but avoids decoding/extracting the
-    /// message again in pipelines that already have the merged WARP witness.
+    /// This helper is only for callers that do not have a WARP codeword in
+    /// hand. If both representations are available, use
+    /// [`Self::commit_extension_oracle_with_message`] so the codeword/message
+    /// consistency check is enforced at commit time.
     pub fn commit_extension_message_oracle(
         &self,
         oracle_id: usize,
@@ -566,7 +683,7 @@ where
         ),
         NativeWarpWhirRootProofError,
     > {
-        let challenger = self.base_oracle_challenger(oracle_id);
+        let challenger = self.extension_oracle_challenger(oracle_id);
         self.commit_extension_message_oracle_with_challenger(oracle_id, message, challenger)
     }
 
@@ -678,10 +795,13 @@ where
                 continue;
             }
             self.compiler
-                .check_bound_oracle_shape::<EF, _>(commitment, None)?;
+                .check_bound_oracle_shape::<EF, _>(commitment, Some(values))?;
 
             match (&commitment.commitment, values) {
-                (NativeWarpWhirRootCommitment::BaseMessage(_), RootIopOracleValues::Base(_)) => {
+                (
+                    NativeWarpWhirRootCommitment::BaseMessage(_),
+                    RootIopOracleValues::Base(values),
+                ) => {
                     let message =
                         self.base_message_for_oracle(prover_data, commitment.oracle_id)?;
                     if message.len() != self.compiler.code().msg_len() {
@@ -694,6 +814,11 @@ where
                             .into(),
                         );
                     }
+                    self.ensure_base_codeword_matches_message(
+                        commitment.oracle_id,
+                        values,
+                        message,
+                    )?;
                     let oracle_data = prover_data
                         .iter()
                         .find(|data| data.oracle_id == commitment.oracle_id)
@@ -717,7 +842,7 @@ where
                 }
                 (
                     NativeWarpWhirRootCommitment::BaseMessageShared { column, width, .. },
-                    RootIopOracleValues::Base(_),
+                    RootIopOracleValues::Base(values),
                 ) => {
                     let message =
                         self.base_message_for_oracle(prover_data, commitment.oracle_id)?;
@@ -731,6 +856,11 @@ where
                             .into(),
                         );
                     }
+                    self.ensure_base_codeword_matches_message(
+                        commitment.oracle_id,
+                        values,
+                        message,
+                    )?;
                     let oracle_data = prover_data
                         .iter()
                         .find(|data| data.oracle_id == commitment.oracle_id)
@@ -761,7 +891,7 @@ where
                 }
                 (
                     NativeWarpWhirRootCommitment::ExtensionMessage(_),
-                    RootIopOracleValues::Extension(_),
+                    RootIopOracleValues::Extension(values),
                 ) => {
                     let message =
                         self.extension_message_for_oracle(prover_data, commitment.oracle_id)?;
@@ -775,6 +905,11 @@ where
                             .into(),
                         );
                     }
+                    self.ensure_extension_codeword_matches_message(
+                        commitment.oracle_id,
+                        values,
+                        message,
+                    )?;
                     let oracle_data = prover_data
                         .iter()
                         .find(|data| data.oracle_id == commitment.oracle_id)
@@ -816,10 +951,11 @@ where
             observe_native_root_commitment::<F, Challenger, MT::Commitment>(challenger, commitment);
         }
 
-        // The compact reducer converts all per-oracle WARP constraints into a
-        // single opening claim `(point, value, coeffs)` against the grouped
-        // WHIR oracles. WHIR then proves that grouped opening against the
-        // already committed RS messages.
+        // The compact reducer converts all per-oracle WARP constraints into
+        // the residual query of the one-round source linear-Sigma IOP. The
+        // grouped WHIR adapter packages the corresponding source answer
+        // arrays as one virtual initial-oracle opening, then runs WHIR's own
+        // OOD/proximity combination against the already committed RS messages.
         let (reduction, opening_claim) = prove_compact_batched_root_reduction::<F, EF, Dft, _>(
             self.compiler.code(),
             &statements,
@@ -1194,9 +1330,42 @@ where
         }
     }
 
+    fn ensure_base_codeword_matches_message(
+        &self,
+        oracle_id: usize,
+        codeword: &[F],
+        message: &[F],
+    ) -> Result<(), NativeWarpWhirRootProofError> {
+        let expected_codeword = self.compiler.code().encode(message);
+        if expected_codeword.as_slice() != codeword {
+            return Err(NativeWarpWhirRootReductionError::EncodingMismatch { oracle_id }.into());
+        }
+        Ok(())
+    }
+
+    fn ensure_extension_codeword_matches_message(
+        &self,
+        oracle_id: usize,
+        codeword: &[EF],
+        message: &[EF],
+    ) -> Result<(), NativeWarpWhirRootProofError> {
+        let expected_codeword = self.compiler.code().encode_algebra(message);
+        if expected_codeword.as_slice() != codeword {
+            return Err(NativeWarpWhirRootReductionError::EncodingMismatch { oracle_id }.into());
+        }
+        Ok(())
+    }
+
     fn base_oracle_challenger(&self, oracle_id: usize) -> Challenger {
         let mut challenger = self.challenger_seed.clone();
         challenger.observe(F::from_u64(domain::ROOT_WHIR_BASE_ORACLE));
+        challenger.observe(F::from_usize(oracle_id));
+        challenger
+    }
+
+    fn extension_oracle_challenger(&self, oracle_id: usize) -> Challenger {
+        let mut challenger = self.challenger_seed.clone();
+        challenger.observe(F::from_u64(domain::ROOT_WHIR_EXTENSION_ORACLE));
         challenger.observe(F::from_usize(oracle_id));
         challenger
     }

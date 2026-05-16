@@ -13,10 +13,11 @@
 //! "evaluate at `m + d + 1` integer points + Lagrange-interpolate" pattern).
 //!
 //! The optimal-cost algorithm is the bottleneck inner kernel of the WARP
-//! §6.3 twin-constraint sumcheck prover (Lemma 6.4); applying it on both
-//! the codeword side (`m = log n`, `d = 1`) and the constraint side
-//! (`m = log M`, `d = PESAT degree`) brings the per-round cost from
-//! `O((n + M·d) · log(n·M·d))` down to `O(n + M·d)`.
+//! §6.3 twin-constraint sumcheck prover (Lemma 6.4). The same local Claim 6.5
+//! parameter `m` is instantiated in two different spaces: `m = log_codeword_len`
+//! on the codeword side (`d = 1`), and `m = log_constraints` on the PESAT
+//! constraint side (`d = PESAT degree`). This keeps the per-round cost at
+//! `O(n + M_pesat·d)` instead of `O((n + M_pesat·d) · log(n·M_pesat·d))`.
 
 use alloc::vec;
 use alloc::vec::Vec;

@@ -134,7 +134,7 @@ where
         let n = self.code.codeword_len();
         let k = self.code.msg_len();
         let shape = self.pesat.shape();
-        let log_m = shape.log_constraints;
+        let log_constraints = shape.log_constraints;
 
         if proof.f.len() != n || proof.w.len() != k {
             return Err(FinalizerError::Decider(DeciderError::EncodingMismatch));
@@ -162,8 +162,8 @@ where
         if instance.beta.len() != shape.beta_len() {
             return Err(FinalizerError::Decider(DeciderError::BundledPesat));
         }
-        let beta_tau = &instance.beta[..log_m];
-        let beta_x = &instance.beta[log_m..];
+        let beta_tau = &instance.beta[..log_constraints];
+        let beta_x = &instance.beta[log_constraints..];
         let mut z = Vec::with_capacity(beta_x.len() + proof.w.len());
         z.extend_from_slice(beta_x);
         z.extend_from_slice(&proof.w);

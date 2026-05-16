@@ -137,13 +137,31 @@ pub struct RootIopOpeningClaim<F, EF> {
 
 /// Opening proof placeholder carried inside WARP proofs.
 ///
-/// A proof system that compiles the whole root IOP should replace the list of
-/// individual PCS proofs with these claim ids, then authenticate all recorded
-/// ids with one final proof.
+/// The root IOP verifier reconstructs claim ids from deterministic replay
+/// order. The serialized WARP proof only needs to expose how many openings the
+/// placeholder represents, so malformed batched proofs can still be rejected
+/// before the final root proof is checked.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RootIopOpeningProof {
-    /// Claim ids, in the same order as the opened indices/points.
-    pub claim_ids: Vec<usize>,
+    /// Number of root IOP claims represented by this placeholder.
+    pub count: usize,
+}
+
+impl RootIopOpeningProof {
+    /// Create a compact root IOP opening placeholder.
+    pub const fn new(count: usize) -> Self {
+        Self { count }
+    }
+
+    /// Number of root IOP claims represented by this placeholder.
+    pub const fn len(&self) -> usize {
+        self.count
+    }
+
+    /// Return whether the placeholder represents no openings.
+    pub const fn is_empty(&self) -> bool {
+        self.count == 0
+    }
 }
 
 /// Root proof shape when both WARP step openings and final decider openings

@@ -111,7 +111,7 @@ fn records_and_checks_base_and_extension_claims() {
         RootIopCommittedCodeword<F>,
     >>::open_batch(&prover, &fresh, &[1, 3])
     .unwrap();
-    assert_eq!(fresh_proof.claim_ids, alloc::vec![0, 1]);
+    assert_eq!(fresh_proof.len(), 2);
 
     let (acc_commitment, acc_data) =
         <RootIopProver<F, EF> as AccumulatorCommitmentBackend<F, EF, DummyChallenger>>::commit(
@@ -131,7 +131,16 @@ fn records_and_checks_base_and_extension_claims() {
     >>::open_batch(&prover, &acc_data, &[0, 2])
     .unwrap();
     assert_eq!(acc_commitment.oracle_id, 1);
-    assert_eq!(acc_proof.claim_ids, alloc::vec![2, 3]);
+    assert_eq!(acc_proof.len(), 2);
+    assert_eq!(
+        prover
+            .transcript()
+            .claims
+            .iter()
+            .map(|claim| claim.claim_id)
+            .collect::<alloc::vec::Vec<_>>(),
+        alloc::vec![0, 1, 2, 3]
+    );
 
     let transcript = prover.transcript();
     transcript.verify_witnessed_claim_values().unwrap();
@@ -173,7 +182,73 @@ fn verifier_expected_claims_match_prover_transcript() {
 }
 
 #[test]
-fn bound_recorder_binds_real_commitments_and_claim_ids() {
+fn compact_opening_count_mismatch_is_rejected() {
+    let prover = RootIopProver::<F, EF>::new(2);
+    let fresh = prover
+        .commit_fresh_codeword(
+            alloc::vec![
+                F::from_u64(1),
+                F::from_u64(2),
+                F::from_u64(3),
+                F::from_u64(4)
+            ],
+            alloc::vec![F::from_u64(1)],
+        )
+        .unwrap();
+    let (values, _proof) = <RootIopProver<F, EF> as ExternalCodewordBatchOpeningProver<
+        F,
+        RootIopCommittedCodeword<F>,
+    >>::open_batch(&prover, &fresh, &[0, 2])
+    .unwrap();
+
+    let verifier = RootIopVerifier::<F, EF>::new(2);
+    let malformed = RootIopOpeningProof::new(1);
+    assert_eq!(
+        <RootIopVerifier<F, EF> as ExternalCodewordBatchOpeningVerifier<
+            F,
+            DummyChallenger,
+        >>::verify_batch_opening(&verifier, &fresh.commitment(), 2, &[0, 2], &values, &malformed),
+        Err(RootIopError::OpeningArityMismatch)
+    );
+}
+
+#[test]
+fn deterministic_claim_ids_reject_reordered_transcript() {
+    let prover = RootIopProver::<F, EF>::new(2);
+    let fresh = prover
+        .commit_fresh_codeword(
+            alloc::vec![
+                F::from_u64(1),
+                F::from_u64(2),
+                F::from_u64(3),
+                F::from_u64(4)
+            ],
+            alloc::vec![F::from_u64(1)],
+        )
+        .unwrap();
+    let (values, proof) = <RootIopProver<F, EF> as ExternalCodewordBatchOpeningProver<
+        F,
+        RootIopCommittedCodeword<F>,
+    >>::open_batch(&prover, &fresh, &[0, 2])
+    .unwrap();
+
+    let verifier = RootIopVerifier::<F, EF>::new(2);
+    <RootIopVerifier<F, EF> as ExternalCodewordBatchOpeningVerifier<
+        F,
+        DummyChallenger,
+    >>::verify_batch_opening(&verifier, &fresh.commitment(), 2, &[0, 2], &values, &proof)
+    .unwrap();
+
+    let mut transcript = prover.transcript();
+    transcript.claims.swap(0, 1);
+    assert_eq!(
+        verifier.verify_against_transcript(&transcript),
+        Err(RootIopError::ClaimMetadataMismatch(0))
+    );
+}
+
+#[test]
+fn bound_recorder_binds_real_commitments_and_deterministic_claim_ids() {
     let prover = RootIopBoundProver::<F, EF, ToyMmcs>::new(ToyMmcs, 2);
     let fresh = prover
         .commit_fresh_codeword(

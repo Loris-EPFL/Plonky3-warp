@@ -38,7 +38,7 @@ fn systematic_code() -> ReedSolomonCode<F, Dft> {
     ReedSolomonCode::new_systematic(2, 1, Dft::default())
 }
 
-fn whir_pcs(num_variables: usize) -> TestWhirPcs {
+fn whir_pcs_with_rate(num_variables: usize, starting_log_inv_rate: usize) -> TestWhirPcs {
     let perm = Perm::new_from_rng_128(&mut SmallRng::seed_from_u64(3));
     let mmcs = MyMmcs::new(MyHash::new(perm.clone()), MyCompress::new(perm), 0);
     let params = ProtocolParameters {
@@ -48,7 +48,7 @@ fn whir_pcs(num_variables: usize) -> TestWhirPcs {
         folding_factor: FoldingFactor::Constant(2),
         mmcs,
         soundness_type: SecurityAssumption::CapacityBound,
-        starting_log_inv_rate: 1,
+        starting_log_inv_rate,
     };
     TestWhirPcs::new(
         num_variables,
@@ -56,6 +56,19 @@ fn whir_pcs(num_variables: usize) -> TestWhirPcs {
         Dft::default(),
         SumcheckStrategy::Classic,
     )
+}
+
+fn whir_pcs(num_variables: usize) -> TestWhirPcs {
+    whir_pcs_with_rate(num_variables, 1)
+}
+
+fn assert_encoding_mismatch(err: NativeWarpWhirRootProofError, oracle_id: usize) {
+    match err {
+        NativeWarpWhirRootProofError::Reduction(
+            NativeWarpWhirRootReductionError::EncodingMismatch { oracle_id: actual },
+        ) => assert_eq!(actual, oracle_id),
+        other => panic!("expected encoding mismatch for oracle {oracle_id}, got {other:?}"),
+    }
 }
 
 #[test]
@@ -177,6 +190,167 @@ fn compiled_eval_claims_bind_to_whir_commitment() {
 
     assert_eq!(opening, verified_opening);
     assert_eq!(opening.value, codeword_poly.eval_base(&opening.point));
+}
+
+#[test]
+#[should_panic(expected = "WHIR variable count must match WARP RS message dimension")]
+fn root_system_rejects_wrong_whir_message_dimension() {
+    let code = systematic_code();
+    let message_pcs = whir_pcs(code.log_msg_len() + 1);
+    let _ = NativeWarpWhirRootProofSystem::new(&message_pcs, &code, challenger());
+}
+
+#[test]
+#[should_panic(expected = "WHIR starting inverse rate must match WARP RS code")]
+fn root_system_rejects_wrong_whir_initial_rate() {
+    let code = ReedSolomonCode::new_systematic(2, 2, Dft::default());
+    let message_pcs = whir_pcs_with_rate(code.log_msg_len(), 1);
+    let _ = NativeWarpWhirRootProofSystem::new(&message_pcs, &code, challenger());
+}
+
+#[test]
+fn native_root_commitment_projects_to_warp_mmcs_root() {
+    let base = NativeWarpWhirRootCommitment::BaseMessage(11usize);
+    assert_eq!(base.warp_mmcs_root(), &11);
+    assert_eq!(base.shared_base_position(), None);
+
+    let shared = NativeWarpWhirRootCommitment::BaseMessageShared {
+        root: 17usize,
+        column: 3,
+        width: 5,
+    };
+    assert_eq!(shared.warp_mmcs_root(), &17);
+    assert_eq!(shared.shared_base_position(), Some((3, 5)));
+
+    let extension = NativeWarpWhirRootCommitment::ExtensionMessage(23usize);
+    assert_eq!(extension.warp_mmcs_root(), &23);
+    assert_eq!(extension.shared_base_position(), None);
+}
+
+#[test]
+fn root_commit_rejects_inconsistent_base_codeword_and_message() {
+    let code = systematic_code();
+    let message_pcs = whir_pcs(code.log_msg_len());
+    let root_system = NativeWarpWhirRootProofSystem::new(&message_pcs, &code, challenger());
+    let message = vec![
+        F::from_u64(2),
+        F::from_u64(5),
+        F::from_u64(8),
+        F::from_u64(13),
+    ];
+    let codeword = code.encode(&message);
+    let mut wrong_message = message.clone();
+    wrong_message[0] += F::ONE;
+
+    let err = match root_system.commit_base_message_oracle(7, codeword, wrong_message) {
+        Ok(_) => panic!("inconsistent base oracle should be rejected"),
+        Err(err) => err,
+    };
+    assert_encoding_mismatch(err, 7);
+}
+
+#[test]
+fn shared_root_commit_rejects_inconsistent_column() {
+    let code = systematic_code();
+    let message_pcs = whir_pcs(code.log_msg_len());
+    let root_system = NativeWarpWhirRootProofSystem::new(&message_pcs, &code, challenger());
+    let message0 = vec![
+        F::from_u64(2),
+        F::from_u64(3),
+        F::from_u64(5),
+        F::from_u64(7),
+    ];
+    let message1 = vec![
+        F::from_u64(11),
+        F::from_u64(13),
+        F::from_u64(17),
+        F::from_u64(19),
+    ];
+    let codeword0 = code.encode(&message0);
+    let codeword1 = code.encode(&message1);
+    let mut wrong_message1 = message1.clone();
+    wrong_message1[2] += F::ONE;
+
+    let err = match root_system.commit_shared_base_message_oracles(vec![
+        (0, codeword0, message0),
+        (1, codeword1, wrong_message1),
+    ]) {
+        Ok(_) => panic!("inconsistent shared oracle should be rejected"),
+        Err(err) => err,
+    };
+    assert_encoding_mismatch(err, 1);
+}
+
+#[test]
+fn extension_root_commit_rejects_non_codeword() {
+    let code = systematic_code();
+    let message_pcs = whir_pcs(code.log_msg_len());
+    let root_system = NativeWarpWhirRootProofSystem::new(&message_pcs, &code, challenger());
+    let message = (0..code.msg_len())
+        .map(|i| EF::from_u64((17 * i + 19) as u64))
+        .collect::<Vec<_>>();
+    let mut codeword = code.encode_algebra(&message);
+    codeword[1] += EF::ONE;
+
+    let err = match root_system.commit_extension_oracle(5, codeword) {
+        Ok(_) => panic!("non-codeword extension oracle should be rejected"),
+        Err(err) => err,
+    };
+    assert_encoding_mismatch(err, 5);
+}
+
+#[test]
+fn extension_root_commit_with_message_rejects_mismatch() {
+    let code = systematic_code();
+    let message_pcs = whir_pcs(code.log_msg_len());
+    let root_system = NativeWarpWhirRootProofSystem::new(&message_pcs, &code, challenger());
+    let message = (0..code.msg_len())
+        .map(|i| EF::from_u64((31 * i + 37) as u64))
+        .collect::<Vec<_>>();
+    let codeword = code.encode_algebra(&message);
+    let mut wrong_message = message.clone();
+    wrong_message[1] += EF::ONE;
+
+    let err = match root_system.commit_extension_oracle_with_message(6, codeword, wrong_message) {
+        Ok(_) => panic!("mismatched extension oracle/message should be rejected"),
+        Err(err) => err,
+    };
+    assert_encoding_mismatch(err, 6);
+}
+
+#[test]
+fn root_prove_rejects_transcript_codeword_not_bound_to_message() {
+    let code = systematic_code();
+    let message_pcs = whir_pcs(code.log_msg_len());
+    let root_system = NativeWarpWhirRootProofSystem::new(&message_pcs, &code, challenger());
+    let message = vec![
+        F::from_u64(2),
+        F::from_u64(5),
+        F::from_u64(8),
+        F::from_u64(13),
+    ];
+    let codeword = code.encode(&message);
+    let (commitment, prover_data) = root_system
+        .commit_base_message_oracle(0, codeword.clone(), message)
+        .expect("base message root oracle commit");
+    let mut transcript_codeword = codeword.clone();
+    transcript_codeword[1] += F::ONE;
+    let claims = vec![RootIopOpeningClaim {
+        claim_id: 0,
+        oracle_id: 0,
+        point: RootIopOpeningPoint::<EF>::Index(0),
+        value: RootIopOpeningValue::Base(codeword[0]),
+    }];
+    let transcript = RootIopBoundTranscript {
+        oracles: vec![(commitment, RootIopOracleValues::Base(transcript_codeword))],
+        claims,
+    };
+
+    let err = match root_system.prove(&transcript, &[prover_data], &mut challenger(), 0) {
+        Ok(_) => panic!("unbound transcript codeword should be rejected"),
+        Err(err) => err,
+    };
+    assert_encoding_mismatch(err, 0);
 }
 
 #[test]
@@ -392,6 +566,34 @@ fn shared_message_root_proof_binds_columns() {
     root_system
         .verify(&commitments, &claims, &proof, &mut challenger(), 0)
         .expect("shared WHIR-bound root proof verification");
+
+    let mut swapped_slot_commitments = commitments.clone();
+    if let NativeWarpWhirRootCommitment::BaseMessageShared { column, .. } =
+        &mut swapped_slot_commitments[0].commitment
+    {
+        *column = 1;
+    } else {
+        panic!("expected shared base commitment");
+    }
+    if let NativeWarpWhirRootCommitment::BaseMessageShared { column, .. } =
+        &mut swapped_slot_commitments[1].commitment
+    {
+        *column = 0;
+    } else {
+        panic!("expected shared base commitment");
+    }
+    assert!(
+        root_system
+            .verify(
+                &swapped_slot_commitments,
+                &claims,
+                &proof,
+                &mut challenger(),
+                0
+            )
+            .is_err(),
+        "swapping shared-root column metadata must be rejected"
+    );
 
     let mut malformed_commitments = commitments;
     if let NativeWarpWhirRootCommitment::BaseMessageShared { column, width, .. } =
