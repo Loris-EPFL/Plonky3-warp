@@ -37,6 +37,7 @@
 //! CARGO_PROFILE_BENCH_DEBUG=1 \
 //! RUSTFLAGS="-C force-frame-pointers=yes" \
 //! P3_WHIR_RECURSIVE_COMPARE=1 \
+//! P3_WHIR_SOUNDNESS=ld \
 //! P3_WHIR_REQUIRE_FULL_SOUNDNESS=1 \
 //! P3_WHIR_RECURSIVE_PHASES=1 \
 //! P3_WHIR_NATIVE_PHASES=1 \
@@ -54,6 +55,7 @@
 //! CARGO_PROFILE_BENCH_DEBUG=1 \
 //! RUSTFLAGS="-C force-frame-pointers=yes" \
 //! P3_WHIR_RECURSIVE_COMPARE=1 \
+//! P3_WHIR_SOUNDNESS=ld \
 //! P3_WHIR_REQUIRE_FULL_SOUNDNESS=1 \
 //! P3_WHIR_RECURSIVE_PHASES=1 \
 //! P3_WHIR_NATIVE_PHASES=1 \
@@ -290,6 +292,30 @@ fn whir_folding_factor() -> usize {
     factor
 }
 
+fn whir_soundness_type() -> SecurityAssumption {
+    match env::var("P3_WHIR_SOUNDNESS") {
+        Ok(raw) => match raw.trim().to_ascii_lowercase().as_str() {
+            "" | "ld" | "list" | "list-decoding" | "list_decoding" | "johnson"
+            | "johnson-bound" | "johnson_bound" | "jb" => SecurityAssumption::JohnsonBound,
+            "ud" | "unique" | "unique-decoding" | "unique_decoding" => {
+                SecurityAssumption::UniqueDecoding
+            }
+            other => {
+                panic!("P3_WHIR_SOUNDNESS must be `ld`/`johnson` or `ud`/`unique`, got `{other}`")
+            }
+        },
+        Err(_) => SecurityAssumption::JohnsonBound,
+    }
+}
+
+fn whir_soundness_label(soundness: SecurityAssumption) -> &'static str {
+    match soundness {
+        SecurityAssumption::UniqueDecoding => "UniqueDecoding",
+        SecurityAssumption::JohnsonBound => "JohnsonBound",
+        SecurityAssumption::CapacityBound => "CapacityBound",
+    }
+}
+
 fn effective_whir_folding_factor(num_variables: usize) -> usize {
     whir_folding_factor().min(num_variables.max(1))
 }
@@ -320,7 +346,7 @@ fn make_whir_protocol_params(mmcs: &MyMmcs, num_variables: usize) -> ProtocolPar
         rs_domain_initial_reduction_factor: 1,
         folding_factor: FoldingFactor::Constant(effective_whir_folding_factor(num_variables)),
         mmcs: mmcs.clone(),
-        soundness_type: SecurityAssumption::JohnsonBound,
+        soundness_type: whir_soundness_type(),
         starting_log_inv_rate: LOG_INV_RATE,
     }
 }
@@ -3013,6 +3039,8 @@ fn write_recursive_compare_jsonl(
                 "\"n\":{},",
                 "\"steps\":{},",
                 "\"arity\":{},",
+                "\"whir_soundness\":\"{}\",",
+                "\"whir_starting_log_inv_rate\":{},",
                 "\"whir_folding_factor\":{},",
                 "\"recursive_outer_openings\":{},",
                 "\"iterations\":{},",
@@ -3109,6 +3137,8 @@ fn write_recursive_compare_jsonl(
             n,
             steps,
             arity,
+            whir_soundness_label(whir_soundness_type()),
+            LOG_INV_RATE,
             folding_factor,
             outer_openings,
             iterations,
@@ -3253,6 +3283,8 @@ fn write_warp_whir_root_compare_jsonl(
                 "\"n\":{},",
                 "\"steps\":{},",
                 "\"arity\":{},",
+                "\"whir_soundness\":\"{}\",",
+                "\"whir_starting_log_inv_rate\":{},",
                 "\"whir_folding_factor\":{},",
                 "\"iterations\":{},",
                 "\"warmup\":{},",
@@ -3315,6 +3347,8 @@ fn write_warp_whir_root_compare_jsonl(
             n,
             steps,
             arity,
+            whir_soundness_label(whir_soundness_type()),
+            LOG_INV_RATE,
             folding_factor,
             iterations,
             warmup,
@@ -3390,6 +3424,8 @@ fn print_warp_whir_root_comparison(num_variable_cases: &[usize], n_values: &[usi
     }
     let arity = warp_fresh_per_step();
     let folding_factor = whir_folding_factor();
+    let soundness = whir_soundness_type();
+    let soundness_label = whir_soundness_label(soundness);
     eprintln!();
     eprintln!("=== WHIR-backed WARP root vs N full WHIR PCS comparison ===");
     eprintln!("    WHIR lane: N full WhirPcs commit+open proofs and WhirPcs verifications.");
@@ -3401,6 +3437,7 @@ fn print_warp_whir_root_comparison(num_variable_cases: &[usize], n_values: &[usi
         arity - 1
     );
     eprintln!("    WHIR folding factor: {folding_factor} variables per folding round.");
+    eprintln!("    WHIR soundness mode: {soundness_label} (set P3_WHIR_SOUNDNESS=ud or ld).");
     eprintln!(
         "    Times are paired medians over {iterations} sample(s) after {warmup} warmup iteration(s)."
     );
@@ -3711,6 +3748,8 @@ fn print_recursive_whir_vs_warp_comparison(num_variable_cases: &[usize], n_value
     let warmup = parse_usize_env("P3_WHIR_RECURSIVE_COMPARE_WARMUP", 0);
     let arity = warp_fresh_per_step();
     let folding_factor = whir_folding_factor();
+    let soundness = whir_soundness_type();
+    let soundness_label = whir_soundness_label(soundness);
     let outer_openings = whir_native_circuit_options().openings_per_table;
     let cpu_parallelism = std::thread::available_parallelism().map_or(1, usize::from);
     let require_full_soundness = env::var("P3_WHIR_REQUIRE_FULL_SOUNDNESS").as_deref() == Ok("1");
@@ -3755,6 +3794,7 @@ fn print_recursive_whir_vs_warp_comparison(num_variable_cases: &[usize], n_value
     eprintln!(
         "    WHIR folding factor: configured {folding_factor}, clamped to k for tiny smoke cases; recursive outer openings per table: {outer_openings}."
     );
+    eprintln!("    WHIR soundness mode: {soundness_label} (set P3_WHIR_SOUNDNESS=ud or ld).");
     eprintln!(
         "    parallel_feature={} rayon_threads={} cpu_available_parallelism={}",
         cfg!(feature = "parallel"),

@@ -5,6 +5,7 @@
 //! and by the Poseidon2 AIR adapter without depending on the WARP crate.
 
 use alloc::format;
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use p3_challenger::{FieldChallenger, GrindingChallenger};
@@ -197,17 +198,45 @@ where
             point.num_variables()
         )));
     }
-    Ok(p3_multilinear_util::poly::Poly::new(evals.to_vec()).eval_ext::<F>(point))
+    if evals.len() == 1 {
+        return Ok(evals[0]);
+    }
+
+    let mut point_iter = point.as_slice().iter().rev();
+    let Some(&first_r) = point_iter.next() else {
+        return Err(WhirNativeCircuitError::ConstraintViolation(String::from(
+            "non-constant known MLE has no point coordinates",
+        )));
+    };
+    let mut layer = Vec::with_capacity(evals.len() / 2);
+    for pair in evals.chunks_exact(2) {
+        layer.push(pair[0] + first_r * (pair[1] - pair[0]));
+    }
+
+    let mut next = Vec::new();
+    for &r in point_iter {
+        next.clear();
+        next.reserve(layer.len() / 2);
+        for pair in layer.chunks_exact(2) {
+            next.push(pair[0] + r * (pair[1] - pair[0]));
+        }
+        core::mem::swap(&mut layer, &mut next);
+    }
+    debug_assert_eq!(layer.len(), 1);
+    Ok(layer[0])
 }
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use p3_baby_bear::{BabyBear, Poseidon2BabyBear, default_babybear_poseidon2_16};
     use p3_challenger::{
         CanObserve, CanSample, CanSampleBits, DuplexChallenger, FieldChallenger, GrindingChallenger,
     };
     use p3_field::PrimeCharacteristicRing;
     use p3_field::extension::BinomialExtensionField;
+    use p3_multilinear_util::poly::Poly;
 
     use super::*;
 
@@ -251,6 +280,23 @@ mod tests {
         fn grind(&mut self, bits: usize) -> Self::Witness {
             self.0.grind(bits)
         }
+    }
+
+    #[test]
+    fn known_mle_matches_poly_eval_ext() {
+        let evals = (0..8)
+            .map(|i| EF::from(F::from_u64(3 * i + 2)))
+            .collect::<Vec<_>>();
+        let point = Point::new(vec![
+            EF::from(F::from_u64(5)),
+            EF::from(F::from_u64(7)),
+            EF::from(F::from_u64(11)),
+        ]);
+
+        let expected = Poly::new(evals.clone()).eval_ext::<F>(&point);
+        let actual = eval_known_mle::<F, EF>(&evals, &point).expect("valid MLE");
+
+        assert_eq!(actual, expected);
     }
 
     #[test]

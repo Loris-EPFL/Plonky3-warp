@@ -21,6 +21,7 @@ use crate::constraints::statement::{
     EqStatement, LinearSigmaConstraint, LinearSigmaStatement, SelectStatement,
 };
 use crate::parameters::{FoldingFactor, ProtocolParameters, SecurityAssumption, SumcheckStrategy};
+use crate::pcs::verifier::errors::VerifierError;
 use crate::pcs::{
     WhirBatchedDeferredProverOracle, WhirBatchedDeferredVerifierOracle, WhirLinearSigmaError,
     WhirPcs,
@@ -229,6 +230,64 @@ fn test_whir_encoded_base_deferred_end_to_end() {
         &mut verifier_challenger,
     )
     .expect("encoded base deferred verification");
+}
+
+#[test]
+fn test_whir_deferred_rejects_missing_initial_commitment_without_panic() {
+    let num_variables = 4;
+    let (pcs, mut rng) = test_pcs(num_variables);
+    let evaluations: Vec<F> = (0..(1 << num_variables)).map(|_| rng.random()).collect();
+    let poly = Poly::new(evaluations.clone());
+    let point = Point::expand_from_univariate(rng.random(), num_variables);
+    let value = poly.eval_base(&point);
+
+    let mut prover_challenger = challenger();
+    let (commitment, prover_data) =
+        pcs.commit_deferred(RowMajorMatrix::new(evaluations, 1), &mut prover_challenger);
+    let (opened_values, mut proof) =
+        pcs.open_deferred(prover_data, &[vec![point.clone()]], &mut prover_challenger);
+    assert_eq!(opened_values[0][0], value);
+    proof.initial_commitment = None;
+
+    let mut verifier_challenger = challenger();
+    let err = pcs
+        .verify_deferred(
+            &commitment,
+            &[vec![(point, value)]],
+            &proof,
+            &mut verifier_challenger,
+        )
+        .expect_err("missing initial commitment must be rejected");
+    assert!(matches!(err, VerifierError::MalformedProof { .. }));
+}
+
+#[test]
+fn test_whir_deferred_rejects_missing_final_polynomial_without_panic() {
+    let num_variables = 4;
+    let (pcs, mut rng) = test_pcs(num_variables);
+    let evaluations: Vec<F> = (0..(1 << num_variables)).map(|_| rng.random()).collect();
+    let poly = Poly::new(evaluations.clone());
+    let point = Point::expand_from_univariate(rng.random(), num_variables);
+    let value = poly.eval_base(&point);
+
+    let mut prover_challenger = challenger();
+    let (commitment, prover_data) =
+        pcs.commit_deferred(RowMajorMatrix::new(evaluations, 1), &mut prover_challenger);
+    let (opened_values, mut proof) =
+        pcs.open_deferred(prover_data, &[vec![point.clone()]], &mut prover_challenger);
+    assert_eq!(opened_values[0][0], value);
+    proof.final_poly = None;
+
+    let mut verifier_challenger = challenger();
+    let err = pcs
+        .verify_deferred(
+            &commitment,
+            &[vec![(point, value)]],
+            &proof,
+            &mut verifier_challenger,
+        )
+        .expect_err("missing final polynomial must be rejected");
+    assert!(matches!(err, VerifierError::MalformedProof { .. }));
 }
 
 #[test]

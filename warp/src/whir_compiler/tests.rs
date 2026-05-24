@@ -499,6 +499,87 @@ fn message_domain_batched_root_proof_rejects_missing_claim_or_swapped_commitment
             .is_err(),
         "root proof must be bound to the Fiat-Shamir state"
     );
+
+    let mut tampered_claim = claims.clone();
+    let RootIopOpeningValue::Base(base_target) = claims[0].value else {
+        panic!("expected base claim");
+    };
+    tampered_claim[0].value = RootIopOpeningValue::Base(base_target + F::ONE);
+    assert!(
+        root_system
+            .verify(&commitments, &tampered_claim, &proof, &mut challenger(), 0)
+            .is_err(),
+        "changing a bound opening target must be rejected"
+    );
+
+    let duplicate_commitments = vec![commitments[0].clone(), commitments[0].clone()];
+    assert!(
+        root_system
+            .verify(
+                &duplicate_commitments,
+                &claims[..1],
+                &proof,
+                &mut challenger(),
+                0
+            )
+            .is_err(),
+        "duplicating an oracle id in the public commitment list must be rejected"
+    );
+}
+
+#[test]
+fn message_domain_batched_root_proof_rejects_same_digest_different_role() {
+    let code = systematic_code();
+    let message_pcs = whir_pcs(code.log_msg_len());
+    let root_system = NativeWarpWhirRootProofSystem::new(&message_pcs, &code, challenger());
+    let base_message = vec![
+        F::from_u64(2),
+        F::from_u64(5),
+        F::from_u64(8),
+        F::from_u64(13),
+    ];
+    let base_codeword = code.encode(&base_message);
+    let (base_commitment, base_prover_data) = root_system
+        .commit_base_message_oracle(0, base_codeword.clone(), base_message)
+        .expect("base message root oracle commit");
+    let commitments = vec![base_commitment.clone()];
+    let claims = vec![RootIopOpeningClaim {
+        claim_id: 0,
+        oracle_id: 0,
+        point: RootIopOpeningPoint::<EF>::Index(4),
+        value: RootIopOpeningValue::Base(base_codeword[4]),
+    }];
+    let transcript = RootIopBoundTranscript {
+        oracles: vec![(
+            base_commitment.clone(),
+            RootIopOracleValues::Base(base_codeword),
+        )],
+        claims: claims.clone(),
+    };
+    let proof = root_system
+        .prove(&transcript, &[base_prover_data], &mut challenger(), 0)
+        .expect("WHIR-bound root proof");
+
+    root_system
+        .verify(&commitments, &claims, &proof, &mut challenger(), 0)
+        .expect("baseline proof verifies before role tampering");
+
+    let root = match &base_commitment.commitment {
+        NativeWarpWhirRootCommitment::BaseMessage(root) => root.clone(),
+        other => panic!("expected base commitment, got {other:?}"),
+    };
+    let mut role_relabelled = commitments;
+    role_relabelled[0].commitment = NativeWarpWhirRootCommitment::BaseMessageShared {
+        root,
+        column: 0,
+        width: 1,
+    };
+    assert!(
+        root_system
+            .verify(&role_relabelled, &claims, &proof, &mut challenger(), 0)
+            .is_err(),
+        "the same digest must not verify when relabelled as a different root role"
+    );
 }
 
 #[test]
@@ -613,6 +694,28 @@ fn shared_message_root_proof_binds_columns() {
                 0
             )
             .is_err()
+    );
+
+    let mut wrong_width_commitments = malformed_commitments;
+    if let NativeWarpWhirRootCommitment::BaseMessageShared { column, width, .. } =
+        &mut wrong_width_commitments[1].commitment
+    {
+        *column = 1;
+        *width += 1;
+    } else {
+        panic!("expected shared base commitment");
+    }
+    assert!(
+        root_system
+            .verify(
+                &wrong_width_commitments,
+                &claims,
+                &proof,
+                &mut challenger(),
+                0
+            )
+            .is_err(),
+        "changing shared-root width metadata must be rejected"
     );
 }
 

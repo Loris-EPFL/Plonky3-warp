@@ -1488,7 +1488,7 @@ where
 
         let commitment_reader = CommitmentReader::new(&self.config);
         let parsed_commitment =
-            commitment_reader.parse_commitment::<F, DIGEST_ELEMS>(proof, challenger);
+            commitment_reader.parse_commitment::<F, DIGEST_ELEMS>(proof, challenger)?;
         if &parsed_commitment.root != commitment {
             return Err(VerifierError::CommitmentMismatch);
         }
@@ -1646,7 +1646,7 @@ where
         // the same transcript interactions the prover performed during commit.
         let commitment_reader = CommitmentReader::new(&self.config);
         let parsed_commitment =
-            commitment_reader.parse_commitment::<F, DIGEST_ELEMS>(proof, challenger);
+            commitment_reader.parse_commitment::<F, DIGEST_ELEMS>(proof, challenger)?;
         if &parsed_commitment.root != commitment {
             return Err(VerifierError::CommitmentMismatch);
         }

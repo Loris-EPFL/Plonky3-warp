@@ -333,10 +333,22 @@ where
         debug_assert_eq!(f_table.len(), 1);
 
         // ---------- 8. Extract merged codeword, witness, and final claims. ----------
-        let f_merged = f_table.into_iter().next().unwrap();
-        let w_merged = w_table.into_iter().next().unwrap();
-        let zeta_0 = a_table.into_iter().next().unwrap();
-        let beta_final = b_table.into_iter().next().unwrap();
+        let f_merged = f_table
+            .into_iter()
+            .next()
+            .expect("twin-constraint folding must leave one merged codeword");
+        let w_merged = w_table
+            .into_iter()
+            .next()
+            .expect("twin-constraint folding must leave one merged witness");
+        let zeta_0 = a_table
+            .into_iter()
+            .next()
+            .expect("twin-constraint folding must leave one merged alpha point");
+        let beta_final = b_table
+            .into_iter()
+            .next()
+            .expect("twin-constraint folding must leave one merged beta point");
 
         let f_poly = Poly::<EF>::new(f_merged.clone());
         let zeta_0_pt = Point::<EF>::new(zeta_0.clone());
@@ -901,10 +913,22 @@ where
         debug_assert_eq!(f_table.len(), 1);
 
         // ---------- 8. Extract merged codeword, witness, and final claims. ----------
-        let f_merged = f_table.into_iter().next().unwrap();
-        let w_merged = w_table.into_iter().next().unwrap();
-        let zeta_0 = a_table.into_iter().next().unwrap();
-        let beta_final = b_table.into_iter().next().unwrap();
+        let f_merged = f_table
+            .into_iter()
+            .next()
+            .expect("twin-constraint folding must leave one merged codeword");
+        let w_merged = w_table
+            .into_iter()
+            .next()
+            .expect("twin-constraint folding must leave one merged witness");
+        let zeta_0 = a_table
+            .into_iter()
+            .next()
+            .expect("twin-constraint folding must leave one merged alpha point");
+        let beta_final = b_table
+            .into_iter()
+            .next()
+            .expect("twin-constraint folding must leave one merged beta point");
 
         let f_poly = Poly::<EF>::new(f_merged.clone());
         let zeta_0_pt = Point::<EF>::new(zeta_0.clone());
@@ -1366,15 +1390,27 @@ where
             debug_assert_eq!(merged[0], f_first_table[0]);
             merged
         } else {
-            f_table.into_iter().next().unwrap()
+            f_table
+                .into_iter()
+                .next()
+                .expect("twin-constraint folding must leave one merged codeword")
         };
-        let w_merged = w_table.into_iter().next().unwrap();
+        let w_merged = w_table
+            .into_iter()
+            .next()
+            .expect("twin-constraint folding must leave one merged witness");
         let zeta_0 = if fresh_only_step {
             vec![EF::ZERO; log_n]
         } else {
-            a_table.into_iter().next().unwrap()
+            a_table
+                .into_iter()
+                .next()
+                .expect("twin-constraint folding must leave one merged alpha point")
         };
-        let beta_final = b_table.into_iter().next().unwrap();
+        let beta_final = b_table
+            .into_iter()
+            .next()
+            .expect("twin-constraint folding must leave one merged beta point");
 
         let f_poly = Poly::<EF>::new(f_merged.clone());
         let zeta_0_pt = Point::<EF>::new(zeta_0.clone());
@@ -2500,7 +2536,9 @@ where
         rows = fold_table(rows, challenge);
     }
     debug_assert_eq!(rows.len(), 1);
-    rows.into_iter().next().unwrap()
+    rows.into_iter()
+        .next()
+        .expect("fresh-only folding must leave one merged codeword")
 }
 
 /// Fold a `Vec<Vec<EF>>` table along its first axis at challenge `γ`,
