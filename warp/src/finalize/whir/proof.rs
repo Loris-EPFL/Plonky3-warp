@@ -14,8 +14,8 @@ pub struct WhirAccumulatorOpeningProof<PcsProof> {
 /// sumcheck to one terminal witness claim. In systematic RS mode, the local
 /// prover obtains that message from the committed codeword's systematic
 /// coordinates and checks that its terminal codeword is `C(w)`. Verifier-side
-/// codeword consistency still belongs to the root exact-codeword bridge, or to
-/// an equivalent backend guarantee.
+/// codeword consistency belongs to the configured backend or terminal-decider
+/// component.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(
     bound = "EF: Serialize + serde::de::DeserializeOwned, PcsProof: Serialize + serde::de::DeserializeOwned"

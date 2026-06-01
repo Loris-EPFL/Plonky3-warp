@@ -4,11 +4,10 @@
 //! the Boolean PESAT claim over the systematic message subspace of the same
 //! accumulator commitment. With a generic multilinear PCS, these checks are
 //! not a standalone proof of the full WARP decider relation: verifier-side
-//! codeword consistency `f = C(w)` must come from the surrounding root
-//! exact-codeword bridge or from a PCS/backend that explicitly enforces the RS
-//! code relation. The prover API still fails closed by checking that its local
-//! terminal codeword is exactly the RS encoding of the systematic message it
-//! uses in the Boolean sumcheck.
+//! codeword consistency `f = C(w)` must come from the configured backend or
+//! terminal-decider component. The prover API still fails closed by checking
+//! that its local terminal codeword is exactly the RS encoding of the
+//! systematic message it uses in the Boolean sumcheck.
 
 use super::*;
 
@@ -266,7 +265,7 @@ where
 /// The proof verifies the accumulator opening and the direct Boolean PESAT
 /// equation against the same commitment. Full WARP decider soundness also
 /// needs verifier-side codeword consistency `f = C(w)`, supplied by the
-/// surrounding root exact-codeword bridge or an equivalent backend guarantee.
+/// configured backend or terminal-decider component.
 pub struct WhirBooleanWarpFinalizerProtocol<'a, F, EF, Pcs, Challenger, Dft>
 where
     F: TwoAdicField + PrimeCharacteristicRing,

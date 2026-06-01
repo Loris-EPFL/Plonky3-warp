@@ -18,17 +18,13 @@
 //! - all touched oracle commitments are absorbed before reduction challenges
 //!   are sampled.
 //!
-//! This is a prover-side invariant and a proximity-sound verifier statement,
-//! not an exact full-table equality theorem. WHIR proves proximity/opening
-//! soundness for the committed RS oracle. A reduction that wants to invoke
-//! WARP's exact source-paper `MT.Commit`/`MT.Open` transcript must first pass
-//! through the source-WARP projection bridge: outside MMCS binding failure, an
-//! exact-codeword bridge must identify the full committed table with `C(w)`.
-//! For base WARP slots, that bridge also relies on the alphabet condition that
-//! the committed table is genuinely `F`-valued, not merely an extension-field
-//! RS word extracted by WHIR over `EF`. The native API enforces this on the
-//! prover path by committing base oracles through `Mmcs<F>` data; an untyped
-//! extension-only commitment would need a separate subfield proof.
+//! This is a prover-side invariant and a proximity/opening verifier statement.
+//! The verifier theorem for this module is the recorded linear-opening
+//! relation over typed roots: opened WARP positions are linked to the RS
+//! codewords selected by WHIR extraction. For base WARP slots, typed
+//! commitments/openings enforce `F`-valued leaves before scalar extension into
+//! `EF`; an untyped extension-only commitment would need a separate subfield
+//! proof.
 //!
 //! The proof-system half of this module proves the recorded linear
 //! oracle-opening part of the root IOP with one precommitted WHIR
@@ -51,9 +47,7 @@
 //! OOD/query-combination checks, and the final folding phase. The WARP root
 //! compiler relies on those WHIR round-by-round errors for proximity/opening
 //! soundness; the WARP-specific sumcheck only reduces the recorded linear
-//! opening claims to the `V_poly` residual query supplied to WHIR. It does not,
-//! by itself, certify entrywise equality between the full MMCS table and the
-//! extracted nearby RS codeword.
+//! opening claims to the `V_poly` residual query supplied to WHIR.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -149,10 +143,9 @@ pub use statement::{NativeWarpWhirEvalClaim, NativeWarpWhirOracleStatement};
 /// coefficient or systematic coordinates, so the returned weights are already
 /// transported through the corresponding coordinate map.
 ///
-/// The compiler deliberately exposes only the linear/proximity part. Exact
-/// equality between a verifier's full committed table and the RS codeword
-/// selected by WHIR extraction is an external bridge condition, not a
-/// consequence of compiling the claims.
+/// The compiler deliberately exposes only the linear/proximity part. WARP
+/// step validity and terminal decider obligations are handled by the WARP
+/// replay and configured finalizer, not by compiling these opening claims.
 /// In coefficient layout those are coefficient-coordinate weights; in
 /// systematic layout they are the corresponding Lagrange weights on the
 /// message subgroup. No second code is introduced.
@@ -406,8 +399,8 @@ where
     /// `message_pcs` must be configured with `code.log_msg_len()` variables
     /// and the same RS rate as the WARP code. WHIR commits to the encoded RS
     /// oracle for `w`, and WARP codeword openings are compiled using the same
-    /// [`ReedSolomonCode`] generator. Verifier soundness remains WHIR
-    /// proximity soundness unless an exact-codeword bridge is supplied.
+    /// [`ReedSolomonCode`] generator. Verifier soundness is the recorded
+    /// linear-opening/proximity statement used by the root theorem.
     pub fn new(
         message_pcs: &'a WhirPcs<EF, F, MT, Challenger, Dft, DIGEST_ELEMS>,
         code: &'a ReedSolomonCode<F, Dft>,
@@ -434,11 +427,9 @@ where
     ///
     /// The supplied `codeword` must equal `C(message)` on the prover side.
     /// WHIR then commits to its encoded initial oracle for `message`. During
-    /// proof generation, codeword-index claims are transformed into
-    /// constrained-RS claims over the same message representation. The verifier
-    /// still relies on WHIR proximity plus the source-WARP projection bridge
-    /// required before applying WARP's exact `MT.Commit`/`MT.Open` theorem. In
-    /// particular, the base-field alphabet condition comes from using an
+    /// proof generation, codeword-index and scalar-extension MLE claims are
+    /// transformed into constrained-RS claims over the same message
+    /// representation. The base-field alphabet condition comes from using an
     /// `F`-valued base commitment, not from WHIR's extension-field proximity
     /// extraction alone.
     pub fn commit_base_message_oracle(
@@ -593,8 +584,8 @@ where
     ///
     /// The codeword is decoded back to the RS message and re-encoded before
     /// commitment. Non-codewords are rejected by this prover API. The verifier
-    /// side still gets WHIR proximity/opening soundness; exact full-table
-    /// equality is a separate bridge condition.
+    /// side gets the recorded linear-opening statement through WHIR
+    /// proximity/opening soundness.
     pub fn commit_extension_oracle(
         &self,
         oracle_id: usize,
@@ -1208,16 +1199,16 @@ where
         let mut statement =
             NativeWarpCompactRootStatement::initialize(self.compiler.code().log_msg_len());
         for claim in claims.iter().filter(|claim| claim.oracle_id == oracle_id) {
-            let value = match &claim.value {
-                RootIopOpeningValue::Base(value) => EF::from(*value),
-                _ => {
-                    return Err(NativeWarpWhirClaimCompileError::OracleFieldMismatch(
-                        oracle_id,
-                    ));
-                }
-            };
             match &claim.point {
                 RootIopOpeningPoint::Index(index) | RootIopOpeningPoint::RsCodewordIndex(index) => {
+                    let value = match &claim.value {
+                        RootIopOpeningValue::Base(value) => EF::from(*value),
+                        _ => {
+                            return Err(NativeWarpWhirClaimCompileError::OracleFieldMismatch(
+                                oracle_id,
+                            ));
+                        }
+                    };
                     if *index >= self.compiler.code().codeword_len() {
                         return Err(NativeWarpWhirClaimCompileError::IndexOutOfBounds {
                             oracle_id,
@@ -1226,10 +1217,21 @@ where
                     }
                     statement.add_index(*index, value);
                 }
-                RootIopOpeningPoint::Mle(_) => {
-                    return Err(NativeWarpWhirClaimCompileError::UnsupportedBaseMle(
-                        oracle_id,
-                    ));
+                RootIopOpeningPoint::Mle(point) => {
+                    let value = match &claim.value {
+                        RootIopOpeningValue::Extension(value) => *value,
+                        _ => {
+                            return Err(NativeWarpWhirClaimCompileError::OracleFieldMismatch(
+                                oracle_id,
+                            ));
+                        }
+                    };
+                    if point.len() != self.compiler.code().log_codeword_len() {
+                        return Err(NativeWarpWhirClaimCompileError::PointArityMismatch {
+                            oracle_id,
+                        });
+                    }
+                    statement.add_mle(point.clone(), value);
                 }
             }
         }

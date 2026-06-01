@@ -23,12 +23,9 @@
 //! checks the residual sum. WHIR then authenticates those arrays through its
 //! own combination challenge and constrained-RS proximity phase against the
 //! committed RS oracles. This authentication is WHIR proximity/opening
-//! soundness. It is not an exact full-table codeword-equality proof for WARP's
-//! source-paper Merkle transcript; that identification must be supplied by an
-//! external exact-codeword bridge when the caller invokes WARP's exact
-//! accumulation theorem. For base-field WARP slots, the caller must also have
-//! a typed `F`-valued table or a subfield/alphabet proof; extension-field WHIR
-//! proximity alone can extract an `EF`-valued codeword.
+//! soundness for the recorded linear claims. For base-field WARP slots, the
+//! caller must also have a typed `F`-valued table or a subfield/alphabet proof;
+//! extension-field WHIR proximity alone can extract an `EF`-valued codeword.
 //!
 //! Fiat-Shamir order in this file is deliberately explicit:
 //! 1. commitments are observed by the caller before this reduction starts,

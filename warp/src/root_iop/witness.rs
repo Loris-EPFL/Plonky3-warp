@@ -241,6 +241,16 @@ where
             }
         }
         (
+            RootIopOracleValues::Base(values),
+            RootIopOpeningPoint::Mle(point),
+            RootIopOpeningValue::Extension(value),
+        ) => {
+            let actual = Poly::<F>::new(values.clone()).eval_base(&Point::new(point.clone()));
+            if &actual != value {
+                return Err(RootIopError::ClaimValueMismatch(claim.claim_id));
+            }
+        }
+        (
             RootIopOracleValues::Extension(values),
             RootIopOpeningPoint::Index(index) | RootIopOpeningPoint::RsCodewordIndex(index),
             RootIopOpeningValue::Extension(value),

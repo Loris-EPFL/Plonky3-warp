@@ -370,6 +370,8 @@ fn message_domain_root_proof_batches_residual_openings() {
         .collect::<Vec<_>>();
     let extension_codeword = code.encode_algebra(&extension_message);
     let extension_poly = Poly::new(extension_codeword.clone());
+    let base_poly = Poly::new(base_codeword.clone());
+    let base_point = Point::new(vec![EF::from_u64(23), EF::from_u64(29), EF::from_u64(31)]);
     let extension_point = Point::new(vec![EF::from_u64(3), EF::from_u64(7), EF::from_u64(11)]);
 
     let (base_commitment, base_prover_data) = root_system
@@ -388,6 +390,12 @@ fn message_domain_root_proof_batches_residual_openings() {
         },
         RootIopOpeningClaim {
             claim_id: 1,
+            oracle_id: 0,
+            point: RootIopOpeningPoint::Mle(base_point.as_slice().to_vec()),
+            value: RootIopOpeningValue::Extension(base_poly.eval_base(&base_point)),
+        },
+        RootIopOpeningClaim {
+            claim_id: 2,
             oracle_id: 1,
             point: RootIopOpeningPoint::Mle(extension_point.as_slice().to_vec()),
             value: RootIopOpeningValue::Extension(extension_poly.eval_ext::<F>(&extension_point)),

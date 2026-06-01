@@ -16,10 +16,10 @@
 //!
 //! With a generic multilinear PCS, these two opening checks are not by
 //! themselves a verifier-side proof of WARP's full terminal decider relation,
-//! because `f = C(w)` is an exact RS-codeword condition. The native prover API
-//! rejects a non-codeword terminal witness, but a remote verifier still needs
-//! the surrounding root exact-codeword bridge, or an equivalent PCS/backend
-//! guarantee, before treating this as a full `DACC` finalizer.
+//! because `f = C(w)` is an RS-codeword condition. The native prover API
+//! rejects a non-codeword terminal witness, while verifier-side decider
+//! soundness depends on the configured backend or terminal-decider component
+//! enforcing the same code relation.
 
 use alloc::format;
 use alloc::vec;
