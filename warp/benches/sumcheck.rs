@@ -79,7 +79,6 @@ use std::time::{Duration, Instant};
 use std::vec::Vec;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use p3_baby_bear::{BabyBear, Poseidon2BabyBear, default_babybear_poseidon2_16};
 use p3_challenger::{
     CanObserve, CanSample, CanSampleBits, CanSampleUniformBits, DuplexChallenger, FieldChallenger,
     GrindingChallenger, ResamplingError,
@@ -94,13 +93,14 @@ use p3_circuit_prover::{
 use p3_commit::MultilinearPcs;
 use p3_dft::Radix2DFTSmallBatch;
 use p3_field::extension::BinomialExtensionField;
-use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, TwoAdicField};
+use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear, default_koalabear_poseidon2_16};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::current_num_threads;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_multilinear_util::point::Point;
 use p3_multilinear_util::poly::Poly;
-use p3_poseidon2_circuit_air::BabyBearD4Width16;
+use p3_poseidon2_circuit_air::KoalaBearD4Width16;
 use p3_recursion::CircuitChallenger;
 use p3_recursion::pcs::fri::{MerkleCapTargets, RecValMmcs};
 use p3_recursion::pcs::set_whir_mmcs_private_data;
@@ -134,9 +134,9 @@ use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
 use serde::{Deserialize, Serialize};
 
-type F = BabyBear;
+type F = KoalaBear;
 type EF = BinomialExtensionField<F, 4>;
-type Perm = Poseidon2BabyBear<16>;
+type Perm = Poseidon2KoalaBear<16>;
 type MyHash = PaddingFreeSponge<Perm, 16, 8, 8>;
 type MyCompress = TruncatedPermutation<Perm, 2, 8, 16>;
 type PackedF = <F as Field>::Packing;
@@ -190,7 +190,7 @@ struct WarpKernelFixture<P = NativeBenchPesat> {
 }
 
 fn make_permutation() -> Perm {
-    default_babybear_poseidon2_16()
+    default_koalabear_poseidon2_16()
 }
 
 fn make_challenger() -> MyChallenger {
@@ -317,7 +317,30 @@ fn whir_soundness_label(soundness: SecurityAssumption) -> &'static str {
 }
 
 fn effective_whir_folding_factor(num_variables: usize) -> usize {
-    whir_folding_factor().min(num_variables.max(1))
+    let configured = whir_folding_factor().min(num_variables.max(1));
+    let required_for_two_adicity = (num_variables + LOG_INV_RATE).saturating_sub(F::TWO_ADICITY);
+    configured
+        .max(required_for_two_adicity)
+        .min(num_variables.max(1))
+}
+
+fn effective_whir_rest_folding_factor(num_variables: usize) -> usize {
+    let configured = whir_folding_factor().min(num_variables.max(1));
+    let required_for_two_adicity =
+        (num_variables + LOG_INV_RATE).saturating_sub(F::TWO_ADICITY + 1);
+    configured
+        .max(required_for_two_adicity)
+        .min(num_variables.max(1))
+}
+
+fn whir_folding_strategy(num_variables: usize) -> FoldingFactor {
+    let first = effective_whir_folding_factor(num_variables);
+    let rest = effective_whir_rest_folding_factor(num_variables);
+    if first == rest {
+        FoldingFactor::Constant(rest)
+    } else {
+        FoldingFactor::ConstantFromSecondRound(first, rest)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -344,7 +367,7 @@ fn make_whir_protocol_params(mmcs: &MyMmcs, num_variables: usize) -> ProtocolPar
         security_level: 32,
         pow_bits: 0,
         rs_domain_initial_reduction_factor: 1,
-        folding_factor: FoldingFactor::Constant(effective_whir_folding_factor(num_variables)),
+        folding_factor: whir_folding_strategy(num_variables),
         mmcs: mmcs.clone(),
         soundness_type: whir_soundness_type(),
         starting_log_inv_rate: LOG_INV_RATE,
@@ -512,7 +535,7 @@ fn whir_native_circuit_options() -> WhirNativeCircuitOptions {
 }
 
 fn eval_bench_poseidon2(config: Poseidon2Config, input: &[EF]) -> Option<Vec<EF>> {
-    if config != Poseidon2Config::BabyBearD4Width16 {
+    if config != Poseidon2Config::KoalaBearD4Width16 {
         return None;
     }
     if input.len() != config.width_ext() {
@@ -841,11 +864,11 @@ fn try_build_n_whir_recursive_bundle_from_native_with_phases(
     let phase_start = Instant::now();
     let whir_config = make_whir_config(&fixture.mmcs, fixture.code.log_msg_len());
     let recursive_inputs = make_recursive_whir_inputs(&native, &whir_config);
-    let poseidon2_config = Poseidon2Config::BabyBearD4Width16;
+    let poseidon2_config = Poseidon2Config::KoalaBearD4Width16;
 
     let mut circuit_builder = CircuitBuilder::new();
-    circuit_builder.enable_poseidon2_perm::<BabyBearD4Width16, _>(
-        generate_poseidon2_trace::<EF, BabyBearD4Width16>,
+    circuit_builder.enable_poseidon2_perm::<KoalaBearD4Width16, _>(
+        generate_poseidon2_trace::<EF, KoalaBearD4Width16>,
         make_permutation(),
     );
     circuit_builder.enable_recompose::<F>(generate_recompose_trace::<F, EF>);
@@ -853,7 +876,7 @@ fn try_build_n_whir_recursive_bundle_from_native_with_phases(
     let mut per_proof_op_ids = Vec::with_capacity(recursive_inputs.len());
     for input in &recursive_inputs {
         let targets = RecursiveWhirTargets::new_private_proof(&mut circuit_builder, input);
-        let mut challenger = CircuitChallenger::<16, 8, Poseidon2Config>::new_babybear();
+        let mut challenger = CircuitChallenger::<16, 8, Poseidon2Config>::new_koalabear();
         challenger.init::<F, EF>(&mut circuit_builder);
         let op_ids = verify_native_whir_proof_circuit::<
             F,
@@ -3781,7 +3804,7 @@ fn print_recursive_whir_vs_warp_comparison(num_variable_cases: &[usize], n_value
     );
     eprintln!("    WARP lane: existing WARP VACC/DACC root proof, kept outside recursion.");
     eprintln!(
-        "    Comparison contract: all lanes use the same Boolean witnesses, k/N grid, BabyBear D4 field, WHIR folding factor, MMCS, challenger, and Reed-Solomon code."
+        "    Comparison contract: all lanes use the same Boolean witnesses, k/N grid, KoalaBear D4 field, WHIR folding factor, MMCS, challenger, and Reed-Solomon code."
     );
     eprintln!(
         "    Soundness: full benchmark path; no count-only WitnessChecks summary is accepted{}.",
@@ -3792,7 +3815,7 @@ fn print_recursive_whir_vs_warp_comparison(num_variable_cases: &[usize], n_value
         }
     );
     eprintln!(
-        "    WHIR folding factor: configured {folding_factor}, clamped to k for tiny smoke cases; recursive outer openings per table: {outer_openings}."
+        "    WHIR folding factor: configured {folding_factor}, clamped to k for tiny smoke cases, and raised per table when needed for field two-adicity; recursive outer openings per table: {outer_openings}."
     );
     eprintln!("    WHIR soundness mode: {soundness_label} (set P3_WHIR_SOUNDNESS=ud or ld).");
     eprintln!(
