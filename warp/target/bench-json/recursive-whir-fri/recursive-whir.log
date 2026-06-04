@@ -1,0 +1,19 @@
+    Finished `bench` profile [optimized] target(s) in 0.07s
+     Running benches/sumcheck.rs (target/release/deps/sumcheck-6cf6550f876cb3e4)
+Gnuplot not found, using plotters backend
+
+=== Recursive WHIR-only benchmark on Boolean MLE opening workload ===
+    Statement: N private Boolean MLE witnesses, each with 4 deterministic opening claims.
+    Lane: build N native WHIR proofs, run one verifier circuit for those N proofs, then prove that verifier trace with the WHIR-native outer path.
+    WHIR folding factor: configured 4, clamped per k; recursive outer openings per table: 2.
+    WHIR soundness mode: JohnsonBound (set P3_WHIR_SOUNDNESS=ud or ld).
+    Times are medians over 1 sample(s) after 0 warmup iteration(s).
+k     N       recursive prove   recursive verify  proof B       payload B     mmcs ops      pub inputs    priv inputs   
+    running k=12, N=36: recursive WHIR setup...
+    running k=12, N=36: recursive WHIR prover samples...
+    running k=12, N=36: recursive WHIR verifier samples...
+12    36      328.718 s         10.931 s          13717494      13756234      29196         2160          115146        
+      Recursive WHIR prove stats: [min=328.718 s med=328.718 s mean=328.718 s max=328.718 s sd=0 ns]
+      Recursive WHIR verify stats: [min=10.931 s med=10.931 s mean=10.931 s max=10.931 s sd=0 ns]
+      Recursive WHIR metrics: total_artifact_bytes=15317816 commitments=42 opening_claims=1249 whir_queries=3956 sumcheck_rounds=666 table_count=6 max_table_height=16777216 total_table_cells=336216064
+

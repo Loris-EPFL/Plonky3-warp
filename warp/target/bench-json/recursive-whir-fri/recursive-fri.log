@@ -1,0 +1,1520 @@
+warning: function `assert_quintic_field` is never used
+  --> recursion/examples/common/mod.rs:81:8
+   |
+81 | pub fn assert_quintic_field(field: FieldOption, quintic: bool) {
+   |        ^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `default_goldilocks_poseidon2_8` is never used
+  --> recursion/examples/common/mod.rs:90:8
+   |
+90 | pub fn default_goldilocks_poseidon2_8() -> p3_goldilocks::Poseidon2Goldilocks<8> {
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `report_proof_size` is never used
+  --> recursion/examples/common/mod.rs:98:8
+   |
+98 | pub fn report_proof_size<S: Serialize>(proof: &S) {
+   |        ^^^^^^^^^^^^^^^^^
+
+warning: `p3-recursion` (example "recursive_whir_workload") generated 3 warnings
+    Finished `release` profile [optimized] target(s) in 0.06s
+     Running `target/release/examples/recursive_whir_workload --k 12 --n 36 --iters 1 --warmup 0 --log-blowup 2 --max-log-arity 2 --log-final-poly-len 6 --query-pow-bits 15 --security-level 124`
+
+=== Regular recursive FRI on WARP/WHIR opening workload ===
+    Statement: N private Boolean MLE witnesses, each with 4 deterministic public opening claims.
+    Template: ../Plonky3-recursion recursive_fibonacci.rs flow.
+    Lane: build N native FRI leaf proofs, run one verifier circuit for those N proofs, then prove that verifier trace with the stock FRI recursion path.
+    FRI params: log_blowup=2 max_log_arity=2 log_final_poly_len=6 cap_height=0 commit_pow=0 query_pow=15 security=124.
+k     N       FRI total       base build      base prove      recursive       nodes       bytes       
+INFO     AluAir::compute_schedule [ 638µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 1.53ms | 100.00% ]
+INFO     AluAir::compute_schedule [ 647µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 746µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 618µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 647µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 655µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 634µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 701µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 637µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 579µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 659µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 639µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 585µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 732µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 642µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 618µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 688µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 640µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 647µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 678µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 627µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 643µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 657µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 614µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 555µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 626µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 652µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 629µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 883µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 616µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 627µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 653µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 577µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 618µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 633µs | 100.00% ]
+INFO     run [ 8.66ms | 100.00% ]
+INFO     prove_all_tables [ 3.17s | 0.14% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 2.48µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.03µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 883µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 5.77ms | 0.18% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.16s | 76.74% / 99.65% ]
+INFO        ┝━ infer log of constraint degree [ 12.6µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.57µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 28.3µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.82ms | 0.05% / 0.06% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 362µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.69ms | 0.05% / 0.05% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 222µs | 0.01% ]
+INFO        ┝━ compute quotient [ 384ms | 2.81% / 12.13% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 296ms | 9.32% ]
+INFO        ┝━ compute_inverse_denominators [ 39.1ms | 1.23% ]
+INFO        ┕━ FRI prover [ 299ms | 0.11% / 9.43% ]
+INFO           ┝━ commit phase [ 294ms | 8.10% / 9.26% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 728ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 29.7ms | 0.94% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 899ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 4.37ms | 0.14% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 744ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.69ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 677ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 504µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 456ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 286µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 373ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 157µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 204ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 64.9µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 944µs | 0.03% ]
+INFO           ┕━ query phase [ 1.04ms | 0.03% ]
+INFO     run [ 5.19ms | 100.00% ]
+INFO     prove_all_tables [ 3.17s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.80µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.12µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 808µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 1.97ms | 0.06% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.17s | 77.34% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 11.9µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.40µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 25.1µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.22ms | 0.03% / 0.04% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 252µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.42ms | 0.04% / 0.04% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 212µs | 0.01% ]
+INFO        ┝━ compute quotient [ 375ms | 2.32% / 11.82% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 302ms | 9.51% ]
+INFO        ┝━ compute_inverse_denominators [ 39.6ms | 1.25% ]
+INFO        ┕━ FRI prover [ 297ms | 0.13% / 9.37% ]
+INFO           ┝━ commit phase [ 289ms | 7.94% / 9.12% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 948ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 27.4ms | 0.86% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.10µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 5.66ms | 0.18% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 583ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 2.55ms | 0.08% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 424ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 692µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 509ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 840µs | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 495ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 126µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 456ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 218µs | 0.01% ]
+INFO           ┝━ grind for proof-of-work witness [ 3.01ms | 0.09% ]
+INFO           ┕━ query phase [ 801µs | 0.03% ]
+INFO     run [ 5.10ms | 100.00% ]
+INFO     prove_all_tables [ 3.20s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.86µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 842ns | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 781µs | 0.02% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.00ms | 0.06% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.19s | 76.87% / 99.88% ]
+INFO        ┝━ infer log of constraint degree [ 11.4µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.20µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 25.7µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 3.50ms | 0.09% / 0.11% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 497µs | 0.02% ]
+INFO        ┝━ compute quotient [ 2.18ms | 0.06% / 0.07% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 196µs | 0.01% ]
+INFO        ┝━ compute quotient [ 377ms | 2.44% / 11.80% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 299ms | 9.36% ]
+INFO        ┝━ compute_inverse_denominators [ 39.0ms | 1.22% ]
+INFO        ┕━ FRI prover [ 314ms | 0.15% / 9.81% ]
+INFO           ┝━ commit phase [ 296ms | 7.92% / 9.26% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 846ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 29.2ms | 0.91% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 732ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 8.06ms | 0.25% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 675ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 3.28ms | 0.10% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 511ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 588µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 449ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 646µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 252ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.02ms | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 505ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 56.9µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 12.3ms | 0.38% ]
+INFO           ┕━ query phase [ 794µs | 0.02% ]
+INFO     run [ 5.21ms | 100.00% ]
+INFO     prove_all_tables [ 3.12s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.83µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.22µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 775µs | 0.02% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 1.99ms | 0.06% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.11s | 77.05% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 12.0µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.24µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 28.1µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.28ms | 0.03% / 0.04% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 231µs | 0.01% ]
+INFO        ┝━ compute quotient [ 2.04ms | 0.04% / 0.07% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 933µs | 0.03% ]
+INFO        ┝━ compute quotient [ 370ms | 2.30% / 11.87% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 299ms | 9.57% ]
+INFO        ┝━ compute_inverse_denominators [ 39.4ms | 1.26% ]
+INFO        ┕━ FRI prover [ 299ms | 0.13% / 9.58% ]
+INFO           ┝━ commit phase [ 293ms | 8.17% / 9.38% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 824ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 28.1ms | 0.90% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 821ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 5.08ms | 0.16% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 722ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 2.57ms | 0.08% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 707ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 759µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 289ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 435µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 425ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 871µs | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 219ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 56.1µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 1.30ms | 0.04% ]
+INFO           ┕━ query phase [ 801µs | 0.03% ]
+INFO     run [ 5.40ms | 100.00% ]
+INFO     prove_all_tables [ 3.14s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.73µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.21µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 791µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 1.95ms | 0.06% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.14s | 77.33% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 12.4µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.25µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 26.2µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.28ms | 0.03% / 0.04% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 369µs | 0.01% ]
+INFO        ┝━ compute quotient [ 2.71ms | 0.04% / 0.09% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 1.33ms | 0.04% ]
+INFO        ┝━ compute quotient [ 364ms | 2.28% / 11.58% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 292ms | 9.30% ]
+INFO        ┝━ compute_inverse_denominators [ 41.9ms | 1.33% ]
+INFO        ┕━ FRI prover [ 298ms | 0.08% / 9.50% ]
+INFO           ┝━ commit phase [ 279ms | 7.68% / 8.88% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 884ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 30.2ms | 0.96% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 690ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 4.35ms | 0.14% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 584ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.52ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 509ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.17ms | 0.04% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 442ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 182µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 380ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 287µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 156ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 49.0µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 16.3ms | 0.52% ]
+INFO           ┕━ query phase [ 841µs | 0.03% ]
+INFO     run [ 5.37ms | 100.00% ]
+INFO     prove_all_tables [ 3.45s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.60µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.44µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 784µs | 0.02% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 1.97ms | 0.06% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.45s | 78.97% / 99.88% ]
+INFO        ┝━ infer log of constraint degree [ 12.3µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.31µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 31.6µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.62ms | 0.04% / 0.05% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 398µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.32ms | 0.03% / 0.04% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 272µs | 0.01% ]
+INFO        ┝━ compute quotient [ 380ms | 2.21% / 11.02% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 304ms | 8.81% ]
+INFO        ┝━ compute_inverse_denominators [ 39.8ms | 1.15% ]
+INFO        ┕━ FRI prover [ 299ms | 0.09% / 8.66% ]
+INFO           ┝━ commit phase [ 293ms | 7.41% / 8.50% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 766ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 28.4ms | 0.82% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 714ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 5.11ms | 0.15% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.11µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.88ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 467ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 929µs | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 509ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.04ms | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 550ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 95.4µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 425ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 52.5µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 1.77ms | 0.05% ]
+INFO           ┕━ query phase [ 496µs | 0.01% ]
+INFO     run [ 5.16ms | 100.00% ]
+INFO     prove_all_tables [ 3.25s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.78µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.21µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 792µs | 0.02% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 1.93ms | 0.06% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.25s | 76.68% / 99.88% ]
+INFO        ┝━ infer log of constraint degree [ 11.9µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.27µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 27.0µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 3.74ms | 0.10% / 0.11% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 330µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.60ms | 0.04% / 0.05% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 362µs | 0.01% ]
+INFO        ┝━ compute quotient [ 400ms | 2.14% / 12.28% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 330ms | 10.14% ]
+INFO        ┝━ compute_inverse_denominators [ 40.0ms | 1.23% ]
+INFO        ┕━ FRI prover [ 309ms | 0.08% / 9.51% ]
+INFO           ┝━ commit phase [ 299ms | 8.04% / 9.19% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 803ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 27.5ms | 0.85% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 824ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 5.88ms | 0.18% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 773ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 2.10ms | 0.06% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 495ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.19ms | 0.04% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 550ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 626µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 603ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 97.7µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 231ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 107µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 7.46ms | 0.23% ]
+INFO           ┕━ query phase [ 484µs | 0.01% ]
+INFO     run [ 5.23ms | 100.00% ]
+INFO     prove_all_tables [ 3.09s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.75µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.27µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 771µs | 0.02% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.02ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.08s | 77.07% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 12.1µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.42µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 32.0µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.46ms | 0.04% / 0.05% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 292µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.27ms | 0.03% / 0.04% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 322µs | 0.01% ]
+INFO        ┝━ compute quotient [ 370ms | 2.42% / 11.98% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 295ms | 9.57% ]
+INFO        ┝━ compute_inverse_denominators [ 39.2ms | 1.27% ]
+INFO        ┕━ FRI prover [ 292ms | 0.10% / 9.46% ]
+INFO           ┝━ commit phase [ 288ms | 8.13% / 9.32% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 880ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 27.8ms | 0.90% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 707ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 5.07ms | 0.16% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 485ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 2.77ms | 0.09% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 244ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 523µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 505ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 219µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 522ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 169µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 405ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 107µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 538µs | 0.02% ]
+INFO           ┕━ query phase [ 751µs | 0.02% ]
+INFO     run [ 5.64ms | 100.00% ]
+INFO     prove_all_tables [ 3.15s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.88µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.00µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 821µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.00ms | 0.06% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.14s | 76.59% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 13.3µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.69µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 28.4µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 3.14ms | 0.09% / 0.10% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 296µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.53ms | 0.04% / 0.05% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 290µs | 0.01% ]
+INFO        ┝━ compute quotient [ 372ms | 2.32% / 11.81% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 299ms | 9.50% ]
+INFO        ┝━ compute_inverse_denominators [ 50.8ms | 1.62% ]
+INFO        ┕━ FRI prover [ 305ms | 0.09% / 9.71% ]
+INFO           ┝━ commit phase [ 299ms | 7.85% / 9.51% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 824ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 41.9ms | 1.33% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 934ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 6.24ms | 0.20% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 404ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.63ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 521ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 535µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 335ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.01ms | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 567ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 901µs | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 433ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 49.8µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 2.52ms | 0.08% ]
+INFO           ┕━ query phase [ 766µs | 0.02% ]
+INFO     run [ 4.99ms | 100.00% ]
+INFO     prove_all_tables [ 3.07s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 2.10µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.40µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 765µs | 0.02% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 1.93ms | 0.06% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.07s | 77.00% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 12.1µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.20µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 24.9µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.40ms | 0.04% / 0.05% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 245µs | 0.01% ]
+INFO        ┝━ compute quotient [ 2.05ms | 0.03% / 0.07% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 1.08ms | 0.04% ]
+INFO        ┝━ compute quotient [ 364ms | 2.08% / 11.86% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 300ms | 9.77% ]
+INFO        ┝━ compute_inverse_denominators [ 43.4ms | 1.41% ]
+INFO        ┕━ FRI prover [ 292ms | 0.09% / 9.49% ]
+INFO           ┝━ commit phase [ 287ms | 7.97% / 9.33% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.02µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 28.5ms | 0.93% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 971ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 8.51ms | 0.28% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 865ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 2.89ms | 0.09% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 988ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 495µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 591ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.04ms | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 398ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 239µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 548ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 56.4µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 1.17ms | 0.04% ]
+INFO           ┕━ query phase [ 882µs | 0.03% ]
+INFO     run [ 5.21ms | 100.00% ]
+INFO     prove_all_tables [ 3.26s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.90µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 543ns | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 747µs | 0.02% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 1.89ms | 0.06% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.26s | 78.53% / 99.88% ]
+INFO        ┝━ infer log of constraint degree [ 11.7µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.27µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 48.9µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.45ms | 0.03% / 0.04% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 347µs | 0.01% ]
+INFO        ┝━ compute quotient [ 2.63ms | 0.07% / 0.08% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 424µs | 0.01% ]
+INFO        ┝━ compute quotient [ 350ms | 1.89% / 10.71% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 288ms | 8.83% ]
+INFO        ┝━ compute_inverse_denominators [ 49.2ms | 1.51% ]
+INFO        ┕━ FRI prover [ 294ms | 0.09% / 9.00% ]
+INFO           ┝━ commit phase [ 286ms | 7.67% / 8.77% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 838ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 27.8ms | 0.85% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 665ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 4.70ms | 0.14% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 504ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 2.33ms | 0.07% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 430ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 563µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 479ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 260µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 341ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 303µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 445ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 51.1µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 3.82ms | 0.12% ]
+INFO           ┕━ query phase [ 737µs | 0.02% ]
+INFO     run [ 5.17ms | 100.00% ]
+INFO     prove_all_tables [ 3.07s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.74µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.62µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 784µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.00ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.07s | 76.99% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 12.6µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 2.95µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 26.6µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.96ms | 0.05% / 0.06% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 537µs | 0.02% ]
+INFO        ┝━ compute quotient [ 1.38ms | 0.04% / 0.04% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 274µs | 0.01% ]
+INFO        ┝━ compute quotient [ 362ms | 2.04% / 11.77% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 299ms | 9.73% ]
+INFO        ┝━ compute_inverse_denominators [ 41.5ms | 1.35% ]
+INFO        ┕━ FRI prover [ 296ms | 0.08% / 9.64% ]
+INFO           ┝━ commit phase [ 288ms | 8.04% / 9.39% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 841ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 28.8ms | 0.94% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 708ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 8.02ms | 0.26% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.07µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 2.81ms | 0.09% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 604ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.34ms | 0.04% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 530ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 192µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 477ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 176µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 151ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 69.9µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 4.90ms | 0.16% ]
+INFO           ┕━ query phase [ 492µs | 0.02% ]
+INFO     run [ 5.23ms | 100.00% ]
+INFO     prove_all_tables [ 3.27s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.82µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.50µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 777µs | 0.02% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 1.88ms | 0.06% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.27s | 78.15% / 99.88% ]
+INFO        ┝━ infer log of constraint degree [ 12.3µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.28µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 25.4µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.27ms | 0.03% / 0.04% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 235µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.53ms | 0.04% / 0.05% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 173µs | 0.01% ]
+INFO        ┝━ compute quotient [ 358ms | 2.03% / 10.95% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 292ms | 8.92% ]
+INFO        ┝━ compute_inverse_denominators [ 39.5ms | 1.21% ]
+INFO        ┕━ FRI prover [ 310ms | 0.09% / 9.48% ]
+INFO           ┝━ commit phase [ 288ms | 7.60% / 8.80% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 750ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 30.3ms | 0.92% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 640ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 6.03ms | 0.18% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 504ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.26ms | 0.04% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 500ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 525µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 442ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.12ms | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 452ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 233µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 253ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 43.0µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 18.5ms | 0.57% ]
+INFO           ┕━ query phase [ 847µs | 0.03% ]
+INFO     run [ 6.21ms | 100.00% ]
+INFO     prove_all_tables [ 3.08s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 2.00µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.17µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 853µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.06ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.07s | 76.86% / 99.86% ]
+INFO        ┝━ infer log of constraint degree [ 11.9µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.17µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 26.2µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.63ms | 0.04% / 0.05% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 333µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.40ms | 0.03% / 0.05% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 363µs | 0.01% ]
+INFO        ┝━ compute quotient [ 363ms | 2.07% / 11.79% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 299ms | 9.72% ]
+INFO        ┝━ compute_inverse_denominators [ 40.5ms | 1.31% ]
+INFO        ┕━ FRI prover [ 302ms | 0.10% / 9.80% ]
+INFO           ┝━ commit phase [ 297ms | 7.92% / 9.65% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 828ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 43.8ms | 1.42% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 873ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 4.99ms | 0.16% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 535ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 2.53ms | 0.08% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 501ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.59ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 505ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 257µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 407ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 110µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 500ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 41.2µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 957µs | 0.03% ]
+INFO           ┕━ query phase [ 737µs | 0.02% ]
+INFO     run [ 5.10ms | 100.00% ]
+INFO     prove_all_tables [ 3.23s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.68µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.22µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 795µs | 0.02% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 1.98ms | 0.06% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.23s | 77.32% / 99.88% ]
+INFO        ┝━ infer log of constraint degree [ 11.2µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.12µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 24.9µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 3.01ms | 0.06% / 0.09% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 1.00ms | 0.03% ]
+INFO        ┝━ compute quotient [ 2.09ms | 0.05% / 0.06% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 316µs | 0.01% ]
+INFO        ┝━ compute quotient [ 360ms | 2.06% / 11.14% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 294ms | 9.08% ]
+INFO        ┝━ compute_inverse_denominators [ 64.3ms | 1.99% ]
+INFO        ┕━ FRI prover [ 300ms | 0.09% / 9.27% ]
+INFO           ┝━ commit phase [ 294ms | 7.66% / 9.09% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 743ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 34.7ms | 1.07% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.13µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 8.48ms | 0.26% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 771ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 2.31ms | 0.07% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 634ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 455µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 882ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 303µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 514ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 131µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 499ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 49.6µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 2.42ms | 0.07% ]
+INFO           ┕━ query phase [ 480µs | 0.01% ]
+INFO     run [ 5.20ms | 100.00% ]
+INFO     prove_all_tables [ 3.05s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 2.24µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.09µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 802µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.01ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.05s | 77.43% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 11.9µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.49µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 25.0µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 2.11ms | 0.06% / 0.07% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 407µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.99ms | 0.06% / 0.07% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 222µs | 0.01% ]
+INFO        ┝━ compute quotient [ 368ms | 2.16% / 12.04% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 302ms | 9.89% ]
+INFO        ┝━ compute_inverse_denominators [ 26.0ms | 0.85% ]
+INFO        ┕━ FRI prover [ 287ms | 0.05% / 9.41% ]
+INFO           ┝━ commit phase [ 282ms | 8.06% / 9.25% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 953ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 25.5ms | 0.83% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 763ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 6.98ms | 0.23% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 578ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 2.23ms | 0.07% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 192ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 878µs | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 511ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 229µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 467ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 258µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 418ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 78.9µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 2.99ms | 0.10% ]
+INFO           ┕━ query phase [ 493µs | 0.02% ]
+INFO     run [ 5.20ms | 100.00% ]
+INFO     prove_all_tables [ 3.04s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 2.15µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.53µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 754µs | 0.02% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 1.85ms | 0.06% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.04s | 76.67% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 11.8µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.27µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 24.8µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 2.59ms | 0.07% / 0.09% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 353µs | 0.01% ]
+INFO        ┝━ compute quotient [ 4.07ms | 0.10% / 0.13% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 1.01ms | 0.03% ]
+INFO        ┝━ compute quotient [ 361ms | 2.19% / 11.88% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 295ms | 9.69% ]
+INFO        ┝━ compute_inverse_denominators [ 24.3ms | 0.80% ]
+INFO        ┕━ FRI prover [ 313ms | 0.06% / 10.30% ]
+INFO           ┝━ commit phase [ 300ms | 8.46% / 9.87% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.23µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 30.8ms | 1.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 897ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 6.79ms | 0.22% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 771ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 3.23ms | 0.11% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 497ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 692µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 572ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 354µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 433ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 111µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 504ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 643µs | 0.02% ]
+INFO           ┝━ grind for proof-of-work witness [ 11.0ms | 0.36% ]
+INFO           ┕━ query phase [ 573µs | 0.02% ]
+INFO     run [ 6.44ms | 100.00% ]
+INFO     prove_all_tables [ 3.01s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 2.16µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.60µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 878µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.13ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.01s | 77.29% / 99.86% ]
+INFO        ┝━ infer log of constraint degree [ 12.3µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.53µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 26.9µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 3.41ms | 0.10% / 0.11% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 515µs | 0.02% ]
+INFO        ┝━ compute quotient [ 2.53ms | 0.07% / 0.08% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 302µs | 0.01% ]
+INFO        ┝━ compute quotient [ 360ms | 2.30% / 11.96% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 291ms | 9.66% ]
+INFO        ┝━ compute_inverse_denominators [ 23.8ms | 0.79% ]
+INFO        ┕━ FRI prover [ 289ms | 0.04% / 9.61% ]
+INFO           ┝━ commit phase [ 286ms | 8.26% / 9.52% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 837ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 28.0ms | 0.93% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 701ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 6.13ms | 0.20% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 608ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 2.63ms | 0.09% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 540ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 524µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 450ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 236µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 510ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 129µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 445ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 45.6µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 1.19ms | 0.04% ]
+INFO           ┕━ query phase [ 521µs | 0.02% ]
+INFO     run [ 5.59ms | 100.00% ]
+INFO     prove_all_tables [ 3.05s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.92µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.39µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 808µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 1.99ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.05s | 77.07% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 13.4µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.39µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 26.7µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 3.52ms | 0.08% / 0.12% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 1.23ms | 0.04% ]
+INFO        ┝━ compute quotient [ 2.12ms | 0.06% / 0.07% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 318µs | 0.01% ]
+INFO        ┝━ compute quotient [ 364ms | 2.27% / 11.93% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 295ms | 9.66% ]
+INFO        ┝━ compute_inverse_denominators [ 23.4ms | 0.77% ]
+INFO        ┕━ FRI prover [ 302ms | 0.06% / 9.91% ]
+INFO           ┝━ commit phase [ 296ms | 8.30% / 9.71% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 797ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 33.7ms | 1.10% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 829ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 5.38ms | 0.18% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.11µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 2.99ms | 0.10% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 659ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 560µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 540ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 301µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 519ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 131µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 127ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 50.0µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 3.58ms | 0.12% ]
+INFO           ┕━ query phase [ 532µs | 0.02% ]
+INFO     run [ 5.62ms | 100.00% ]
+INFO     prove_all_tables [ 3.07s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.91µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.29µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 846µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.03ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.06s | 76.76% / 99.86% ]
+INFO        ┝━ infer log of constraint degree [ 13.2µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.71µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 27.0µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 2.15ms | 0.06% / 0.07% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 213µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.24ms | 0.03% / 0.04% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 318µs | 0.01% ]
+INFO        ┝━ compute quotient [ 382ms | 2.30% / 12.47% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 312ms | 10.18% ]
+INFO        ┝━ compute_inverse_denominators [ 26.1ms | 0.85% ]
+INFO        ┕━ FRI prover [ 296ms | 0.04% / 9.67% ]
+INFO           ┝━ commit phase [ 282ms | 8.02% / 9.19% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 822ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 28.1ms | 0.92% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 852ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 4.21ms | 0.14% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.02µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.62ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 681ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.67ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 725ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 173µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 562ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 103µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 474ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 57.2µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 12.0ms | 0.39% ]
+INFO           ┕━ query phase [ 1.38ms | 0.04% ]
+INFO     run [ 5.58ms | 100.00% ]
+INFO     prove_all_tables [ 3.07s | 0.05% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 2.18µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.70µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 1.22ms | 0.04% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 3.35ms | 0.11% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.06s | 78.00% / 99.80% ]
+INFO        ┝━ infer log of constraint degree [ 14.8µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 5.07µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 38.8µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 2.37ms | 0.07% / 0.08% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 217µs | 0.01% ]
+INFO        ┝━ compute quotient [ 2.22ms | 0.06% / 0.07% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 431µs | 0.01% ]
+INFO        ┝━ compute quotient [ 359ms | 2.11% / 11.72% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 295ms | 9.61% ]
+INFO        ┝━ compute_inverse_denominators [ 24.4ms | 0.80% ]
+INFO        ┕━ FRI prover [ 280ms | 0.06% / 9.14% ]
+INFO           ┝━ commit phase [ 276ms | 7.87% / 9.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 925ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 26.0ms | 0.85% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 727ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 5.43ms | 0.18% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 716ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.17ms | 0.04% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 509ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.00ms | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 417ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 993µs | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 391ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 92.0µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 519ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 176µs | 0.01% ]
+INFO           ┝━ grind for proof-of-work witness [ 1.44ms | 0.05% ]
+INFO           ┕━ query phase [ 768µs | 0.03% ]
+INFO     run [ 5.62ms | 100.00% ]
+INFO     prove_all_tables [ 3.15s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.84µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.28µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 831µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.07ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.14s | 76.39% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 12.3µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.47µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 26.9µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.37ms | 0.03% / 0.04% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 387µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.25ms | 0.03% / 0.04% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 267µs | 0.01% ]
+INFO        ┝━ compute quotient [ 352ms | 2.16% / 11.20% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 284ms | 9.04% ]
+INFO        ┝━ compute_inverse_denominators [ 36.5ms | 1.16% ]
+INFO        ┕━ FRI prover [ 347ms | 0.05% / 11.03% ]
+INFO           ┝━ commit phase [ 339ms | 9.32% / 10.79% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.44µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 36.0ms | 1.15% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 692ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 4.97ms | 0.16% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 673ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 2.47ms | 0.08% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 589ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.54ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 559ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 778µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 491ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 191µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 462ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 104µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 5.37ms | 0.17% ]
+INFO           ┕━ query phase [ 732µs | 0.02% ]
+INFO     run [ 5.76ms | 100.00% ]
+INFO     prove_all_tables [ 3.17s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.96µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.41µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 850µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.08ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.17s | 78.32% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 13.1µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.62µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 28.3µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.59ms | 0.03% / 0.05% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 557µs | 0.02% ]
+INFO        ┝━ compute quotient [ 1.13ms | 0.03% / 0.04% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 300µs | 0.01% ]
+INFO        ┝━ compute quotient [ 350ms | 2.04% / 11.03% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 285ms | 8.99% ]
+INFO        ┝━ compute_inverse_denominators [ 39.9ms | 1.26% ]
+INFO        ┕━ FRI prover [ 291ms | 0.05% / 9.17% ]
+INFO           ┝━ commit phase [ 288ms | 7.70% / 9.07% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 776ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 30.9ms | 0.97% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 860ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 9.10ms | 0.29% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 917ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.41ms | 0.04% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 520ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.48ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 515ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 432µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 558ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 289µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 475ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 122µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 523µs | 0.02% ]
+INFO           ┕━ query phase [ 753µs | 0.02% ]
+INFO     run [ 7.64ms | 100.00% ]
+INFO     prove_all_tables [ 3.01s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 2.17µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.35µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 852µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.13ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.01s | 77.10% / 99.86% ]
+INFO        ┝━ infer log of constraint degree [ 12.7µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.69µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 29.3µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.67ms | 0.04% / 0.06% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 364µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.44ms | 0.04% / 0.05% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 267µs | 0.01% ]
+INFO        ┝━ compute quotient [ 362ms | 2.38% / 12.02% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 291ms | 9.64% ]
+INFO        ┝━ compute_inverse_denominators [ 24.5ms | 0.81% ]
+INFO        ┕━ FRI prover [ 296ms | 0.04% / 9.82% ]
+INFO           ┝━ commit phase [ 288ms | 8.38% / 9.57% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 898ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 27.8ms | 0.92% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 838ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 5.68ms | 0.19% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 672ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.24ms | 0.04% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 511ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 731µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 525ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 186µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 203ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 104µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 462ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 55.0µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 5.91ms | 0.20% ]
+INFO           ┕━ query phase [ 496µs | 0.02% ]
+INFO     run [ 5.64ms | 100.00% ]
+INFO     prove_all_tables [ 3.06s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.81µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.08µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 796µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.03ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.05s | 77.26% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 11.9µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.60µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 28.6µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 2.50ms | 0.07% / 0.08% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 481µs | 0.02% ]
+INFO        ┝━ compute quotient [ 2.79ms | 0.06% / 0.09% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 1.07ms | 0.04% ]
+INFO        ┝━ compute quotient [ 359ms | 2.13% / 11.75% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 294ms | 9.62% ]
+INFO        ┝━ compute_inverse_denominators [ 23.9ms | 0.78% ]
+INFO        ┕━ FRI prover [ 303ms | 0.05% / 9.90% ]
+INFO           ┝━ commit phase [ 293ms | 8.22% / 9.57% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 896ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 27.6ms | 0.90% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 790ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 8.84ms | 0.29% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 826ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.74ms | 0.06% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 536ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.63ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 557ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.25ms | 0.04% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 568ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 256µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 395ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 98.1µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 8.02ms | 0.26% ]
+INFO           ┕━ query phase [ 548µs | 0.02% ]
+INFO     run [ 6.11ms | 100.00% ]
+INFO     prove_all_tables [ 3.69s | 0.03% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 2.12µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 956ns | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 825µs | 0.02% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.44ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.68s | 80.86% / 99.88% ]
+INFO        ┝━ infer log of constraint degree [ 14.9µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 4.84µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 36.5µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 2.90ms | 0.04% / 0.08% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 1.30ms | 0.04% ]
+INFO        ┝━ compute quotient [ 1.40ms | 0.03% / 0.04% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 452µs | 0.01% ]
+INFO        ┝━ compute quotient [ 372ms | 2.02% / 10.07% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 297ms | 8.05% ]
+INFO        ┝━ compute_inverse_denominators [ 36.2ms | 0.98% ]
+INFO        ┕━ FRI prover [ 289ms | 0.05% / 7.84% ]
+INFO           ┝━ commit phase [ 284ms | 6.70% / 7.71% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.05µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 27.4ms | 0.74% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.05µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 6.13ms | 0.17% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 608ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.92ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 515ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.33ms | 0.04% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 587ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 290µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 248ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 170µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 524ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 48.6µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 2.34ms | 0.06% ]
+INFO           ┕━ query phase [ 744µs | 0.02% ]
+INFO     run [ 5.84ms | 100.00% ]
+INFO     prove_all_tables [ 3.09s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 2.03µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.29µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 811µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 1.92ms | 0.06% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.09s | 77.09% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 12.3µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.51µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 25.5µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 2.51ms | 0.05% / 0.08% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 869µs | 0.03% ]
+INFO        ┝━ compute quotient [ 1.21ms | 0.03% / 0.04% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 200µs | 0.01% ]
+INFO        ┝━ compute quotient [ 364ms | 2.11% / 11.78% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 299ms | 9.67% ]
+INFO        ┝━ compute_inverse_denominators [ 36.4ms | 1.18% ]
+INFO        ┕━ FRI prover [ 300ms | 0.05% / 9.71% ]
+INFO           ┝━ commit phase [ 290ms | 8.22% / 9.39% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.17µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 28.2ms | 0.91% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.26µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 4.81ms | 0.16% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 651ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.39ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 587ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.28ms | 0.04% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 505ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 188µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 496ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 113µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 345ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 56.5µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 7.85ms | 0.25% ]
+INFO           ┕━ query phase [ 490µs | 0.02% ]
+INFO     run [ 6.23ms | 100.00% ]
+INFO     prove_all_tables [ 3.02s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 2.07µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.38µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 853µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 1.91ms | 0.06% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.02s | 77.22% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 12.1µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.37µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 27.2µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.27ms | 0.03% / 0.04% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 232µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.48ms | 0.04% / 0.05% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 220µs | 0.01% ]
+INFO        ┝━ compute quotient [ 365ms | 2.22% / 12.08% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 298ms | 9.86% ]
+INFO        ┝━ compute_inverse_denominators [ 28.2ms | 0.93% ]
+INFO        ┕━ FRI prover [ 288ms | 0.11% / 9.54% ]
+INFO           ┝━ commit phase [ 284ms | 8.12% / 9.40% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 693ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 29.8ms | 0.99% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 883ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 5.84ms | 0.19% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 773ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.42ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 647ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 424µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 592ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 821µs | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 314ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 277µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 419ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 99.9µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 121µs | 0.00% ]
+INFO           ┕━ query phase [ 815µs | 0.03% ]
+INFO     run [ 5.60ms | 100.00% ]
+INFO     prove_all_tables [ 3.04s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.79µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.06µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 846µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.16ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.04s | 77.17% / 99.86% ]
+INFO        ┝━ infer log of constraint degree [ 12.5µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.82µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 28.2µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 2.69ms | 0.08% / 0.09% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 347µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.80ms | 0.05% / 0.06% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 277µs | 0.01% ]
+INFO        ┝━ compute quotient [ 369ms | 2.16% / 12.14% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 304ms | 9.98% ]
+INFO        ┝━ compute_inverse_denominators [ 24.6ms | 0.81% ]
+INFO        ┕━ FRI prover [ 292ms | 0.05% / 9.60% ]
+INFO           ┝━ commit phase [ 285ms | 8.11% / 9.36% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 712ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 27.1ms | 0.89% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 836ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 7.30ms | 0.24% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 753ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 2.42ms | 0.08% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 739ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 552µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 478ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 176µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 527ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 439µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 520ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 53.4µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 5.17ms | 0.17% ]
+INFO           ┕━ query phase [ 471µs | 0.02% ]
+INFO     run [ 5.49ms | 100.00% ]
+INFO     prove_all_tables [ 3.11s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.73µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.32µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 774µs | 0.02% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.07ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.11s | 76.92% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 12.2µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.40µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 33.8µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.89ms | 0.03% / 0.06% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 945µs | 0.03% ]
+INFO        ┝━ compute quotient [ 2.02ms | 0.06% / 0.06% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 221µs | 0.01% ]
+INFO        ┝━ compute quotient [ 368ms | 2.29% / 11.83% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 297ms | 9.54% ]
+INFO        ┝━ compute_inverse_denominators [ 29.6ms | 0.95% ]
+INFO        ┕━ FRI prover [ 312ms | 0.04% / 10.04% ]
+INFO           ┝━ commit phase [ 305ms | 8.03% / 9.81% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.11µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 44.7ms | 1.44% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 674ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 5.87ms | 0.19% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.01µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 3.42ms | 0.11% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 555ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 826µs | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 690ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 206µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 501ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 139µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 534ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 80.0µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 5.45ms | 0.18% ]
+INFO           ┕━ query phase [ 565µs | 0.02% ]
+INFO     run [ 5.85ms | 100.00% ]
+INFO     prove_all_tables [ 3.07s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.82µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.60µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 825µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.18ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.07s | 77.56% / 99.86% ]
+INFO        ┝━ infer log of constraint degree [ 21.2µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 4.97µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 41.3µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.60ms | 0.03% / 0.05% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 582µs | 0.02% ]
+INFO        ┝━ compute quotient [ 1.81ms | 0.05% / 0.06% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 221µs | 0.01% ]
+INFO        ┝━ compute quotient [ 370ms | 2.25% / 12.04% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 301ms | 9.79% ]
+INFO        ┝━ compute_inverse_denominators [ 25.9ms | 0.84% ]
+INFO        ┕━ FRI prover [ 286ms | 0.09% / 9.30% ]
+INFO           ┝━ commit phase [ 281ms | 7.88% / 9.14% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 868ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 32.1ms | 1.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.43µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 4.61ms | 0.15% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 547ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.24ms | 0.04% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 530ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 573µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 605ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 202µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 352ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 105µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 544ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 68.9µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 972µs | 0.03% ]
+INFO           ┕━ query phase [ 1.21ms | 0.04% ]
+INFO     run [ 6.18ms | 100.00% ]
+INFO     prove_all_tables [ 3.10s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 2.46µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.78µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 797µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.08ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.09s | 77.30% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 13.3µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.04µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 26.6µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 2.95ms | 0.09% / 0.10% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 250µs | 0.01% ]
+INFO        ┝━ compute quotient [ 2.67ms | 0.06% / 0.09% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 958µs | 0.03% ]
+INFO        ┝━ compute quotient [ 373ms | 2.30% / 12.04% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 302ms | 9.74% ]
+INFO        ┝━ compute_inverse_denominators [ 31.7ms | 1.02% ]
+INFO        ┕━ FRI prover [ 289ms | 0.05% / 9.32% ]
+INFO           ┝━ commit phase [ 286ms | 7.87% / 9.24% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 827ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 30.6ms | 0.99% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 786ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 7.05ms | 0.23% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 816ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.66ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 497ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.45ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 567ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.18ms | 0.04% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 549ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 112µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 494ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 246µs | 0.01% ]
+INFO           ┝━ grind for proof-of-work witness [ 76.5µs | 0.00% ]
+INFO           ┕━ query phase [ 718µs | 0.02% ]
+INFO     run [ 5.47ms | 100.00% ]
+INFO     prove_all_tables [ 3.09s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.92µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.34µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 808µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 1.99ms | 0.06% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.09s | 78.39% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 13.2µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.33µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 26.9µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 2.75ms | 0.08% / 0.09% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 412µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.23ms | 0.03% / 0.04% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 202µs | 0.01% ]
+INFO        ┝━ compute quotient [ 350ms | 2.11% / 11.32% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 285ms | 9.22% ]
+INFO        ┝━ compute_inverse_denominators [ 24.2ms | 0.78% ]
+INFO        ┕━ FRI prover [ 286ms | 0.09% / 9.24% ]
+INFO           ┝━ commit phase [ 282ms | 7.68% / 9.11% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 857ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 36.6ms | 1.18% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 814ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 5.01ms | 0.16% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.03µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.45ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 662ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 620µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 463ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 366µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 272ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 128µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 472ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 47.3µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 620µs | 0.02% ]
+INFO           ┕━ query phase [ 763µs | 0.02% ]
+INFO     run [ 5.59ms | 100.00% ]
+INFO     prove_all_tables [ 3.02s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.75µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.54µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 801µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.03ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.02s | 77.66% / 99.86% ]
+INFO        ┝━ infer log of constraint degree [ 12.7µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.88µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 26.9µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.54ms | 0.04% / 0.05% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 315µs | 0.01% ]
+INFO        ┝━ compute quotient [ 2.13ms | 0.06% / 0.07% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 387µs | 0.01% ]
+INFO        ┝━ compute quotient [ 350ms | 2.15% / 11.56% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 284ms | 9.41% ]
+INFO        ┝━ compute_inverse_denominators [ 23.3ms | 0.77% ]
+INFO        ┕━ FRI prover [ 295ms | 0.04% / 9.75% ]
+INFO           ┝━ commit phase [ 292ms | 8.32% / 9.66% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 850ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 30.5ms | 1.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 845ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 6.17ms | 0.20% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 487ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 2.48ms | 0.08% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 594ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 888µs | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 504ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 393µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 561ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 122µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 651ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 53.5µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 903µs | 0.03% ]
+INFO           ┕━ query phase [ 480µs | 0.02% ]
+INFO     run [ 5.37ms | 100.00% ]
+INFO     prove_all_tables [ 3.02s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.81µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.38µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 799µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 1.97ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.02s | 77.44% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 12.6µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.64µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 26.6µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 1.42ms | 0.04% / 0.05% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 348µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.09ms | 0.03% / 0.04% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 181µs | 0.01% ]
+INFO        ┝━ compute quotient [ 355ms | 2.24% / 11.74% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 287ms | 9.49% ]
+INFO        ┝━ compute_inverse_denominators [ 23.1ms | 0.77% ]
+INFO        ┕━ FRI prover [ 298ms | 0.08% / 9.84% ]
+INFO           ┝━ commit phase [ 293ms | 8.35% / 9.68% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 732ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 28.4ms | 0.94% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.05µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 5.72ms | 0.19% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 756ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 4.16ms | 0.14% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 579ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 747µs | 0.02% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 251ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 985µs | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 542ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 197µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 303ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 98.1µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 1.80ms | 0.06% ]
+INFO           ┕━ query phase [ 768µs | 0.03% ]
+INFO     run [ 5.50ms | 100.00% ]
+INFO     prove_all_tables [ 3.07s | 0.04% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 1.48µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 1.32µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 794µs | 0.03% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 2.01ms | 0.07% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 1 | prep_cols: 2 | rows: 338
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 1 | prep_cols: 2 | rows: 17
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 7 | prep_cols: 20 | rows: 272272 | lanes: 1
+INFO     ┕━ prove_batch [ 3.07s | 76.72% / 99.87% ]
+INFO        ┝━ infer log of constraint degree [ 13.4µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.57µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 27.8µs | 0.00% ] air_idx: 2
+INFO        ┝━ compute quotient [ 2.26ms | 0.07% / 0.07% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 195µs | 0.01% ]
+INFO        ┝━ compute quotient [ 1.58ms | 0.04% / 0.05% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 338µs | 0.01% ]
+INFO        ┝━ compute quotient [ 389ms | 2.32% / 12.67% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 318ms | 10.34% ]
+INFO        ┝━ compute_inverse_denominators [ 24.4ms | 0.79% ]
+INFO        ┕━ FRI prover [ 294ms | 0.08% / 9.56% ]
+INFO           ┝━ commit phase [ 281ms | 7.86% / 9.14% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 961ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 30.5ms | 0.99% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 1.23µs | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 5.54ms | 0.18% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 593ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.63ms | 0.05% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 543ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.07ms | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 558ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 181µs | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 367ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 149µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 171ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 56.8µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 9.81ms | 0.32% ]
+INFO           ┕━ query phase [ 756µs | 0.02% ]
+INFO     AluAir::compute_schedule [ 893µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 925µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 847µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 875µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 829µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 801µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 796µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 784µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 788µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 872µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 830µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 825µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 778µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 762µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 801µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 777µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 1.04ms | 100.00% ]
+INFO     AluAir::compute_schedule [ 761µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 783µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 714µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 735µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 780µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 729µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 738µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 794µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 700µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 948µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 727µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 748µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 799µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 711µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 810µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 737µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 840µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 743µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 722µs | 100.00% ]
+INFO     AluAir::compute_schedule [ 21.7ms | 100.00% ]
+INFO     run [ 558ms | 100.00% ]
+INFO     prove_all_tables [ 17.7s | 1.09% / 100.00% ]
+INFO     ┝━ ConstAir::build_trace [ 3.38µs | 0.00% ]
+INFO     ┝━ PublicAir::build_trace [ 34.3µs | 0.00% ]
+INFO     ┝━ AluAir::compute_schedule [ 28.1ms | 0.16% ]
+INFO     ┝━ AluAir::trace_to_matrix [ 50.5ms | 0.29% ]
+INFO     ┝━ Poseidon2CircuitAir::build_trace [ 123ms | 0.69% ]
+INFO     ┝━ RecomposeAir::build_trace [ 699µs | 0.00% ]
+INFO     ┝━ ｉ [info]: AIR shape | table: "CONST" | main_cols: 4 | prep_cols: 2 | rows: 305
+INFO     ┝━ ｉ [info]: AIR shape | table: "PUBLIC" | main_cols: 4 | prep_cols: 2 | rows: 6048
+INFO     ┝━ ｉ [info]: AIR shape | table: "ALU" | main_cols: 80 | prep_cols: 60 | rows: 380490 | lanes: 3
+INFO     ┝━ ｉ [info]: AIR shape | table: NpoTypeId(poseidon2_perm/koala_bear_d4_w16) | main_cols: 166 | prep_cols: 24 | rows: 405468 | lanes: 1
+INFO     ┝━ ｉ [info]: AIR shape | table: NpoTypeId(recompose) | main_cols: 4 | prep_cols: 2 | rows: 92628 | lanes: 1
+INFO     ┕━ prove_batch [ 17.3s | 83.39% / 97.77% ]
+INFO        ┝━ infer log of constraint degree [ 13.4µs | 0.00% ] air_idx: 0
+INFO        ┝━ infer log of constraint degree [ 3.71µs | 0.00% ] air_idx: 1
+INFO        ┝━ infer log of constraint degree [ 168µs | 0.00% ] air_idx: 2
+INFO        ┝━ infer log of constraint degree [ 340µs | 0.00% ] air_idx: 3
+INFO        ┝━ infer log of constraint degree [ 3.79µs | 0.00% ] air_idx: 4
+INFO        ┝━ compute quotient [ 1.62ms | 0.01% / 0.01% ] air_idx: 0
+INFO        │  ┕━ compute quotient polynomial [ 410µs | 0.00% ]
+INFO        ┝━ compute quotient [ 5.57ms | 0.02% / 0.03% ] air_idx: 1
+INFO        │  ┕━ compute quotient polynomial [ 2.18ms | 0.01% ]
+INFO        ┝━ compute quotient [ 1.37s | 0.48% / 7.73% ] air_idx: 2
+INFO        │  ┕━ compute quotient polynomial [ 1.28s | 7.24% ]
+INFO        ┝━ compute quotient [ 755ms | 0.43% / 4.26% ] air_idx: 3
+INFO        │  ┕━ compute quotient polynomial [ 679ms | 3.83% ]
+INFO        ┝━ compute quotient [ 48.7ms | 0.16% / 0.27% ] air_idx: 4
+INFO        │  ┕━ compute quotient polynomial [ 20.0ms | 0.11% ]
+INFO        ┝━ compute_inverse_denominators [ 44.5ms | 0.25% ]
+INFO        ┕━ FRI prover [ 323ms | 0.04% / 1.82% ]
+INFO           ┝━ commit phase [ 309ms | 1.53% / 1.75% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 726ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 30.3ms | 0.17% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 796ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 5.35ms | 0.03% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 720ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 1.81ms | 0.01% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 461ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 762µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 260ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 187µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 395ns | 0.00% ]
+INFO           │  ┝━ fold_matrix [ 266µs | 0.00% ]
+INFO           │  ┝━ grind for proof-of-work witness [ 180ns | 0.00% ]
+INFO           │  ┕━ fold_matrix [ 66.0µs | 0.00% ]
+INFO           ┝━ grind for proof-of-work witness [ 5.38ms | 0.03% ]
+INFO           ┕━ query phase [ 1.16ms | 0.01% ]
+12    36      180.837s        44.040s         113.022s        23.774s         1           542693      

@@ -111,14 +111,22 @@ where
             proof.round_evals.len()
         )));
     }
+    if proof.degree == 0 {
+        return Err(WhirNativeCircuitError::ConstraintViolation(String::from(
+            "sumcheck degree must be at least 1",
+        )));
+    }
+    let expected_round_evals = proof.degree.checked_add(1).ok_or_else(|| {
+        WhirNativeCircuitError::ConstraintViolation(String::from("sumcheck degree is too large"))
+    })?;
 
     let mut claim = initial_claim;
     let mut point = Vec::with_capacity(num_variables);
     for (round, evals) in proof.round_evals.iter().enumerate() {
-        if evals.len() != proof.degree + 1 {
+        if evals.len() != expected_round_evals {
             return Err(WhirNativeCircuitError::ConstraintViolation(format!(
                 "sumcheck round {round} degree mismatch: expected {}, got {}",
-                proof.degree + 1,
+                expected_round_evals,
                 evals.len()
             )));
         }
@@ -357,5 +365,25 @@ mod tests {
         let mut verifier_challenger = TestChallenger::new();
         verify_sumcheck::<F, EF, _>(&proof, 2, initial_claim, &mut verifier_challenger)
             .expect_err("tampered proof must fail");
+    }
+
+    #[test]
+    fn degree_zero_sumcheck_rejects_without_panic() {
+        let initial_claim = EF::from(F::from_u64(3));
+        let proof = WhirNativeSumcheckProof {
+            degree: 0,
+            round_evals: vec![vec![initial_claim]],
+        };
+        let mut verifier_challenger = TestChallenger::new();
+
+        let err = verify_sumcheck::<F, EF, _>(&proof, 1, initial_claim, &mut verifier_challenger)
+            .expect_err("degree-zero proof must be rejected");
+
+        match err {
+            WhirNativeCircuitError::ConstraintViolation(message) => {
+                assert!(message.contains("degree"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
     }
 }

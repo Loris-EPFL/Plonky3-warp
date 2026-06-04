@@ -19,7 +19,6 @@ use core::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use p3_air::{Air, AirBuilder, BaseAir, RowWindow};
-use p3_baby_bear::BabyBear;
 use p3_challenger::{CanObserve, CanSampleUniformBits, FieldChallenger, GrindingChallenger};
 use p3_circuit::ops::{
     NpoPrivateData, Op, Poseidon2CircuitRow, Poseidon2Config, Poseidon2Trace, RecomposeTrace,
@@ -29,12 +28,13 @@ use p3_circuit::{AluOpKind, Circuit, Traces, WitnessId};
 use p3_commit::Mmcs;
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, PrimeField64, TwoAdicField};
+use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use p3_multilinear_util::point::Point;
 use p3_multilinear_util::poly::Poly;
-use p3_poseidon2_circuit_air::{BabyBearD4Width16, extract_preprocessed_from_operations};
+use p3_poseidon2_circuit_air::{KoalaBearD4Width16, extract_preprocessed_from_operations};
 use p3_whir::constraints::statement::{
     BatchedLinearSigmaProverOracle, BatchedLinearSigmaReductionProof, EqStatement,
     LinearSigmaConstraint, LinearSigmaStatement, prove_batched_linear_sigma_reduction,
@@ -49,7 +49,7 @@ use p3_whir::pcs::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::batch_stark_prover::BABY_BEAR_MODULUS;
+use crate::batch_stark_prover::KOALA_BEAR_MODULUS;
 use crate::whir_native_sumcheck::{
     WhirNativeSumcheckProof, point_from_prefix_current_suffix, verify_sumcheck,
 };
@@ -85,6 +85,42 @@ fn whir_native_column_batching_enabled() -> bool {
     #[cfg(not(feature = "std"))]
     {
         false
+    }
+}
+
+#[cfg(feature = "std")]
+std::thread_local! {
+    static WHIR_NATIVE_SKIP_INTERNAL_SELF_VERIFICATION: std::cell::Cell<bool> =
+        std::cell::Cell::new(false);
+}
+
+#[cfg(feature = "std")]
+fn whir_native_internal_self_verification_enabled() -> bool {
+    WHIR_NATIVE_SKIP_INTERNAL_SELF_VERIFICATION.with(|skip| !skip.get())
+}
+
+#[cfg(not(feature = "std"))]
+const fn whir_native_internal_self_verification_enabled() -> bool {
+    true
+}
+
+#[cfg(feature = "std")]
+struct WhirNativeInternalSelfVerificationGuard {
+    previous: bool,
+}
+
+#[cfg(feature = "std")]
+impl WhirNativeInternalSelfVerificationGuard {
+    fn disable() -> Self {
+        let previous = WHIR_NATIVE_SKIP_INTERNAL_SELF_VERIFICATION.with(|skip| skip.replace(true));
+        Self { previous }
+    }
+}
+
+#[cfg(feature = "std")]
+impl Drop for WhirNativeInternalSelfVerificationGuard {
+    fn drop(&mut self) {
+        WHIR_NATIVE_SKIP_INTERNAL_SELF_VERIFICATION.with(|skip| skip.set(self.previous));
     }
 }
 
@@ -1089,7 +1125,7 @@ pub fn prove_whir_native_circuit<
 where
     F: TwoAdicField + PrimeField64 + Ord + Send + Sync + Serialize + for<'de> Deserialize<'de>,
     EF: ExtensionField<F>
-        + ExtensionField<BabyBear>
+        + ExtensionField<KoalaBear>
         + TwoAdicField
         + Send
         + Sync
@@ -1211,6 +1247,8 @@ where
         }
         WhirNativeOpeningMode::ColumnBatched => {
             let phase_start = diagnostics.start();
+            // Opt-in only: this path clones and pads full row-domain column vectors,
+            // so peak memory can be high for wide circuits.
             for layout in &column_batch_layouts {
                 let pcs = make_pcs(layout.num_variables);
                 let mut challenger = make_challenger();
@@ -1617,8 +1655,99 @@ where
         proof_byte_count,
     );
 
-    let phase_start = diagnostics.start();
-    verify_whir_native_circuit_proof::<
+    if whir_native_internal_self_verification_enabled() {
+        let phase_start = diagnostics.start();
+        verify_whir_native_circuit_proof::<
+            F,
+            EF,
+            MT,
+            Challenger,
+            Dft,
+            MakePcs,
+            MakeChallenger,
+            PoseidonEval,
+            DIGEST_ELEMS,
+        >(
+            circuit,
+            public_inputs,
+            options,
+            &proof,
+            make_pcs,
+            make_challenger,
+            _poseidon_eval,
+        )?;
+        diagnostics.record_phase(
+            "verify_whir_native_circuit_proof",
+            phase_start,
+            Some(tables.len()),
+            Some(total_opening_claims),
+            None,
+        );
+    }
+    diagnostics.record_phase(
+        "total",
+        total_start,
+        Some(tables.len()),
+        Some(total_opening_claims),
+        proof_byte_count,
+    );
+
+    Ok(proof)
+}
+
+/// Build and prove a WHIR-native circuit table proof without the prover's final
+/// internal self-verification.
+///
+/// This is intended for benchmarks that time proving and verification
+/// separately. Production callers should use [`prove_whir_native_circuit`].
+#[cfg(feature = "std")]
+#[allow(clippy::too_many_arguments)]
+pub fn prove_whir_native_circuit_without_internal_verification<
+    F,
+    EF,
+    MT,
+    Challenger,
+    Dft,
+    MakePcs,
+    MakeChallenger,
+    PoseidonEval,
+    const DIGEST_ELEMS: usize,
+>(
+    circuit: &Circuit<EF>,
+    public_inputs: &[EF],
+    private_inputs: &[EF],
+    npo_private_data: &[NpoPrivateData],
+    traces: &Traces<EF>,
+    options: WhirNativeCircuitOptions,
+    make_pcs: MakePcs,
+    make_challenger: MakeChallenger,
+    poseidon_eval: PoseidonEval,
+) -> Result<WhirNativeCircuitProof<F, EF, MT>, WhirNativeCircuitError>
+where
+    F: TwoAdicField + PrimeField64 + Ord + Send + Sync + Serialize + for<'de> Deserialize<'de>,
+    EF: ExtensionField<F>
+        + ExtensionField<KoalaBear>
+        + TwoAdicField
+        + Send
+        + Sync
+        + Serialize
+        + for<'de> Deserialize<'de>,
+    MT: Mmcs<F>,
+    MT::Commitment: Clone + PartialEq + Serialize + for<'de> Deserialize<'de>,
+    MT::Proof: Clone + Serialize + for<'de> Deserialize<'de>,
+    Challenger: FieldChallenger<F>
+        + GrindingChallenger<Witness = F>
+        + CanSampleUniformBits<F>
+        + CanObserve<F>
+        + CanObserve<MT::Commitment>
+        + Clone,
+    Dft: TwoAdicSubgroupDft<F>,
+    MakePcs: Fn(usize) -> WhirPcs<EF, F, MT, Challenger, Dft, DIGEST_ELEMS>,
+    MakeChallenger: Fn() -> Challenger,
+    PoseidonEval: Fn(Poseidon2Config, &[EF]) -> Option<Vec<EF>>,
+{
+    let _guard = WhirNativeInternalSelfVerificationGuard::disable();
+    prove_whir_native_circuit::<
         F,
         EF,
         MT,
@@ -1631,28 +1760,14 @@ where
     >(
         circuit,
         public_inputs,
+        private_inputs,
+        npo_private_data,
+        traces,
         options,
-        &proof,
         make_pcs,
         make_challenger,
-        _poseidon_eval,
-    )?;
-    diagnostics.record_phase(
-        "verify_whir_native_circuit_proof",
-        phase_start,
-        Some(tables.len()),
-        Some(total_opening_claims),
-        None,
-    );
-    diagnostics.record_phase(
-        "total",
-        total_start,
-        Some(tables.len()),
-        Some(total_opening_claims),
-        proof_byte_count,
-    );
-
-    Ok(proof)
+        poseidon_eval,
+    )
 }
 
 /// Build an oracle proof and include the extracted trace payload for diagnostics.
@@ -1686,7 +1801,7 @@ pub fn prove_whir_native_diagnostic_trace<
 where
     F: TwoAdicField + PrimeField64 + Ord + Send + Sync + Serialize + for<'de> Deserialize<'de>,
     EF: ExtensionField<F>
-        + ExtensionField<BabyBear>
+        + ExtensionField<KoalaBear>
         + TwoAdicField
         + Send
         + Sync
@@ -1759,7 +1874,7 @@ pub fn verify_whir_native_circuit_proof<
 where
     F: TwoAdicField + PrimeField64 + Ord + Send + Sync + Serialize + for<'de> Deserialize<'de>,
     EF: ExtensionField<F>
-        + ExtensionField<BabyBear>
+        + ExtensionField<KoalaBear>
         + TwoAdicField
         + Send
         + Sync
@@ -2204,7 +2319,7 @@ fn validate_trace_payload<F, EF, PoseidonEval>(
 ) -> Result<(), WhirNativeCircuitError>
 where
     F: Field,
-    EF: ExtensionField<F> + ExtensionField<BabyBear> + Send + Sync,
+    EF: ExtensionField<F> + ExtensionField<KoalaBear> + Send + Sync,
     PoseidonEval: Fn(Poseidon2Config, &[EF]) -> Option<Vec<EF>>,
 {
     if public_inputs.len() != circuit.public_flat_len {
@@ -2235,7 +2350,7 @@ fn validate_const_public_and_alu<F, EF>(
 ) -> Result<(), WhirNativeCircuitError>
 where
     F: Field,
-    EF: ExtensionField<F> + ExtensionField<BabyBear> + Send + Sync,
+    EF: ExtensionField<F> + ExtensionField<KoalaBear> + Send + Sync,
 {
     let mut const_idx = 0;
     let mut public_idx = 0;
@@ -2377,7 +2492,7 @@ fn validate_recompose_tables<F, EF>(
 ) -> Result<(), WhirNativeCircuitError>
 where
     F: Field,
-    EF: ExtensionField<F> + ExtensionField<BabyBear> + Send + Sync,
+    EF: ExtensionField<F> + ExtensionField<KoalaBear> + Send + Sync,
 {
     for table in &payload.recompose_tables {
         let ops = npo_ops_for_type(circuit, &table.op_type);
@@ -2438,7 +2553,7 @@ fn validate_poseidon2_tables<F, EF, PoseidonEval>(
 ) -> Result<(), WhirNativeCircuitError>
 where
     F: Field,
-    EF: ExtensionField<F> + ExtensionField<BabyBear> + Send + Sync,
+    EF: ExtensionField<F> + ExtensionField<KoalaBear> + Send + Sync,
     PoseidonEval: Fn(Poseidon2Config, &[EF]) -> Option<Vec<EF>>,
 {
     for table in &payload.poseidon2_tables {
@@ -2830,7 +2945,7 @@ where
             Op::NonPrimitiveOpWithExecutor { executor, .. } => {
                 let op_type = executor.op_type();
                 if let Some(config) = poseidon2_config_from_op_type(op_type.as_str()) {
-                    if config == Poseidon2Config::BabyBearD4Width16 {
+                    if config == Poseidon2Config::KoalaBearD4Width16 {
                         continue;
                     }
                     return Err(unsupported_poseidon2_component(op_type.as_str()));
@@ -2994,27 +3109,27 @@ where
     F: Field + PrimeField64,
     EF: ExtensionField<F>,
 {
-    let Poseidon2Config::BabyBearD4Width16 = table.config else {
+    let Poseidon2Config::KoalaBearD4Width16 = table.config else {
         return Err(unsupported_poseidon2_component(&table.op_type));
     };
-    ensure_babybear_base_field::<F>()?;
+    ensure_koalabear_base_field::<F>()?;
 
     let mut ops = table
         .rows
         .iter()
         .enumerate()
-        .map(|(row_index, row)| poseidon2_row_to_babybear_op::<F>(table.config, row_index, row))
+        .map(|(row_index, row)| poseidon2_row_to_koalabear_op::<F>(table.config, row_index, row))
         .collect::<Result<Vec<_>, _>>()?;
     let padded_rows = ops.len().max(1).next_power_of_two();
-    ops.resize(padded_rows, poseidon2_babybear_d4_width16_filler_row());
+    ops.resize(padded_rows, poseidon2_koalabear_d4_width16_filler_row());
 
-    let constants = BabyBearD4Width16::round_constants();
-    let air = BabyBearD4Width16::default_air();
+    let constants = KoalaBearD4Width16::round_constants();
+    let air = KoalaBearD4Width16::default_air();
     let trace = air.generate_trace_rows(&ops, &constants, 0);
-    if trace.width != P2_BB_D4_WIDTH16_AIR_WIDTH {
+    if trace.width != P2_KB_D4_WIDTH16_AIR_WIDTH {
         return Err(WhirNativeCircuitError::ConstraintViolation(format!(
             "Poseidon2 AIR trace width mismatch: expected {}, got {}",
-            P2_BB_D4_WIDTH16_AIR_WIDTH, trace.width
+            P2_KB_D4_WIDTH16_AIR_WIDTH, trace.width
         )));
     }
     let rows = trace
@@ -3030,19 +3145,19 @@ where
             let mut row_values = row
                 .iter()
                 .copied()
-                .map(babybear_to_ef::<F, EF>)
+                .map(koalabear_to_ef::<F, EF>)
                 .collect::<Vec<_>>();
             row_values.extend(read_values);
             row_values
         })
         .collect::<Vec<_>>();
-    let rows = append_cyclic_shifted_columns(rows, P2_BB_D4_WIDTH16_AIR_WIDTH)?;
+    let rows = append_cyclic_shifted_columns(rows, P2_KB_D4_WIDTH16_AIR_WIDTH)?;
 
     Ok(pack_rows(
         WhirNativeTableKind::Poseidon2,
         table.op_type.clone(),
         rows,
-        Some(P2_BB_D4_WIDTH16_TABLE_WIDTH),
+        Some(P2_KB_D4_WIDTH16_TABLE_WIDTH),
         options,
     ))
 }
@@ -3050,30 +3165,30 @@ where
 fn poseidon2_read_values_for_air_row<F, EF>(
     config: Poseidon2Config,
     row: Option<&WhirNativePoseidon2Row<F>>,
-    air_row: &[BabyBear],
+    air_row: &[KoalaBear],
 ) -> Vec<EF>
 where
     F: Field + PrimeField64,
     EF: ExtensionField<F>,
 {
     let Some(row) = row else {
-        return EF::zero_vec(P2_BB_D4_WIDTH16_WITNESS_PORTS);
+        return EF::zero_vec(P2_KB_D4_WIDTH16_WITNESS_PORTS);
     };
-    let mut values = Vec::with_capacity(P2_BB_D4_WIDTH16_WITNESS_PORTS);
-    for limb in 0..P2_BB_D4_WIDTH16_WIDTH_EXT {
+    let mut values = Vec::with_capacity(P2_KB_D4_WIDTH16_WITNESS_PORTS);
+    for limb in 0..P2_KB_D4_WIDTH16_WIDTH_EXT {
         let value = if row.in_ctl[limb] {
             EF::from_basis_coefficients_fn(|coeff| {
-                babybear_to_f::<F>(air_row[limb * config.d() + coeff])
+                koalabear_to_f::<F>(air_row[limb * config.d() + coeff])
             })
         } else {
             EF::ZERO
         };
         values.push(value);
     }
-    for limb in 0..P2_BB_D4_WIDTH16_RATE_EXT {
-        let start = P2_BB_D4_WIDTH16_OUTPUT_OFFSET + limb * config.d();
+    for limb in 0..P2_KB_D4_WIDTH16_RATE_EXT {
+        let start = P2_KB_D4_WIDTH16_OUTPUT_OFFSET + limb * config.d();
         let value = if row.out_ctl[limb] {
-            EF::from_basis_coefficients_fn(|coeff| babybear_to_f::<F>(air_row[start + coeff]))
+            EF::from_basis_coefficients_fn(|coeff| koalabear_to_f::<F>(air_row[start + coeff]))
         } else {
             EF::ZERO
         };
@@ -3104,7 +3219,7 @@ where
     }
     if rows
         .iter()
-        .any(|row| row.len() != air_width + P2_BB_D4_WIDTH16_WITNESS_PORTS)
+        .any(|row| row.len() != air_width + P2_KB_D4_WIDTH16_WITNESS_PORTS)
     {
         return Err(WhirNativeCircuitError::ConstraintViolation(
             "cannot append shifted columns to ragged Poseidon2 rows".to_string(),
@@ -3119,7 +3234,7 @@ where
                     .copied(),
             );
             row.extend(
-                rows[row_index][air_width..air_width + P2_BB_D4_WIDTH16_WITNESS_PORTS]
+                rows[row_index][air_width..air_width + P2_KB_D4_WIDTH16_WITNESS_PORTS]
                     .iter()
                     .copied(),
             );
@@ -3128,46 +3243,46 @@ where
         .collect())
 }
 
-fn ensure_babybear_base_field<F>() -> Result<(), WhirNativeCircuitError>
+fn ensure_koalabear_base_field<F>() -> Result<(), WhirNativeCircuitError>
 where
     F: Field,
 {
-    if F::from_u64(BABY_BEAR_MODULUS) != F::ZERO {
+    if F::from_u64(KOALA_BEAR_MODULUS) != F::ZERO {
         return Err(WhirNativeCircuitError::UnsupportedSoundComponent(
-            "BabyBear D4 Width16 Poseidon2 AIR requires BabyBear as the WHIR-native base field"
+            "KoalaBear D4 Width16 Poseidon2 AIR requires KoalaBear as the WHIR-native base field"
                 .to_string(),
         ));
     }
     Ok(())
 }
 
-fn babybear_to_f<F>(value: BabyBear) -> F
+fn koalabear_to_f<F>(value: KoalaBear) -> F
 where
     F: Field,
 {
     F::from_u64(value.as_canonical_u64())
 }
 
-fn babybear_to_ef<F, EF>(value: BabyBear) -> EF
+fn koalabear_to_ef<F, EF>(value: KoalaBear) -> EF
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    EF::from(babybear_to_f::<F>(value))
+    EF::from(koalabear_to_f::<F>(value))
 }
 
-fn f_to_babybear<F>(value: F) -> BabyBear
+fn f_to_koalabear<F>(value: F) -> KoalaBear
 where
     F: PrimeField64,
 {
-    BabyBear::from_u64(value.as_canonical_u64())
+    KoalaBear::from_u64(value.as_canonical_u64())
 }
 
-fn poseidon2_row_to_babybear_op<F>(
+fn poseidon2_row_to_koalabear_op<F>(
     config: Poseidon2Config,
     row_index: usize,
     row: &WhirNativePoseidon2Row<F>,
-) -> Result<Poseidon2CircuitRow<BabyBear>, WhirNativeCircuitError>
+) -> Result<Poseidon2CircuitRow<KoalaBear>, WhirNativeCircuitError>
 where
     F: Field + PrimeField64,
 {
@@ -3176,12 +3291,12 @@ where
         new_start: row.new_start,
         merkle_path: row.merkle_path,
         mmcs_bit: row.mmcs_bit,
-        mmcs_index_sum: f_to_babybear(row.mmcs_index_sum),
+        mmcs_index_sum: f_to_koalabear(row.mmcs_index_sum),
         input_values: row
             .input_values
             .iter()
             .copied()
-            .map(f_to_babybear)
+            .map(f_to_koalabear)
             .collect(),
         in_ctl: row.in_ctl.clone(),
         input_indices: row.input_indices.clone(),
@@ -3192,17 +3307,17 @@ where
     })
 }
 
-fn poseidon2_babybear_d4_width16_filler_row() -> Poseidon2CircuitRow<BabyBear> {
+fn poseidon2_koalabear_d4_width16_filler_row() -> Poseidon2CircuitRow<KoalaBear> {
     Poseidon2CircuitRow {
         new_start: true,
         merkle_path: false,
         mmcs_bit: false,
-        mmcs_index_sum: BabyBear::ZERO,
-        input_values: BabyBear::zero_vec(P2_BB_D4_WIDTH16_WIDTH),
-        in_ctl: vec![false; P2_BB_D4_WIDTH16_WIDTH_EXT],
-        input_indices: vec![0; P2_BB_D4_WIDTH16_WIDTH_EXT],
-        out_ctl: vec![false; P2_BB_D4_WIDTH16_RATE_EXT],
-        output_indices: vec![0; P2_BB_D4_WIDTH16_RATE_EXT],
+        mmcs_index_sum: KoalaBear::ZERO,
+        input_values: KoalaBear::zero_vec(P2_KB_D4_WIDTH16_WIDTH),
+        in_ctl: vec![false; P2_KB_D4_WIDTH16_WIDTH_EXT],
+        input_indices: vec![0; P2_KB_D4_WIDTH16_WIDTH_EXT],
+        out_ctl: vec![false; P2_KB_D4_WIDTH16_RATE_EXT],
+        output_indices: vec![0; P2_KB_D4_WIDTH16_RATE_EXT],
         mmcs_index_sum_idx: 0,
         mmcs_ctl_enabled: false,
     }
@@ -3305,16 +3420,16 @@ where
                 options,
             ));
         } else if let Some(config) = poseidon2_config_from_op_type(&op_type) {
-            if config != Poseidon2Config::BabyBearD4Width16 {
+            if config != Poseidon2Config::KoalaBearD4Width16 {
                 return Err(unsupported_poseidon2_component(&op_type));
             }
-            ensure_babybear_base_field::<F>()?;
+            ensure_koalabear_base_field::<F>()?;
             let expected_rows = expected_poseidon2_rows_from_circuit::<EF>(circuit, &op_type)?;
             metadata.push(metadata_for_shape(
                 WhirNativeTableKind::Poseidon2,
                 op_type,
                 expected_rows.len().max(1).next_power_of_two(),
-                P2_BB_D4_WIDTH16_TABLE_WIDTH,
+                P2_KB_D4_WIDTH16_TABLE_WIDTH,
                 options,
             ));
         } else {
@@ -3896,25 +4011,53 @@ where
     for round in 0..num_variables {
         let suffix_vars = num_variables - round - 1;
         let suffix_count = 1usize << suffix_vars;
-        let suffix_results = (0..suffix_count)
+        #[cfg(feature = "parallel")]
+        let evals = (0..suffix_count)
             .into_par_iter()
-            .map(|suffix| suffix_evals(state, round, suffix, degree))
-            .collect::<Vec<_>>();
-        let mut evals = EF::zero_vec(degree + 1);
-
-        for values in suffix_results {
-            let values = values?;
-            if values.len() != degree + 1 {
-                return Err(WhirNativeCircuitError::ConstraintViolation(format!(
-                    "sumcheck round {round} suffix evaluator returned {} points, expected {}",
-                    values.len(),
-                    degree + 1
-                )));
+            .try_fold(
+                || EF::zero_vec(degree + 1),
+                |mut acc, suffix| -> Result<Vec<EF>, WhirNativeCircuitError> {
+                    let values = suffix_evals(state, round, suffix, degree)?;
+                    if values.len() != degree + 1 {
+                        return Err(WhirNativeCircuitError::ConstraintViolation(format!(
+                            "sumcheck round {round} suffix evaluator returned {} points, expected {}",
+                            values.len(),
+                            degree + 1
+                        )));
+                    }
+                    for (acc, value) in acc.iter_mut().zip(values) {
+                        *acc += value;
+                    }
+                    Ok(acc)
+                },
+            )
+            .try_reduce(
+                || EF::zero_vec(degree + 1),
+                |mut left, right| -> Result<Vec<EF>, WhirNativeCircuitError> {
+                    for (left, value) in left.iter_mut().zip(right) {
+                        *left += value;
+                    }
+                    Ok(left)
+                },
+            )?;
+        #[cfg(not(feature = "parallel"))]
+        let evals = {
+            let mut evals = EF::zero_vec(degree + 1);
+            for suffix in 0..suffix_count {
+                let values = suffix_evals(state, round, suffix, degree)?;
+                if values.len() != degree + 1 {
+                    return Err(WhirNativeCircuitError::ConstraintViolation(format!(
+                        "sumcheck round {round} suffix evaluator returned {} points, expected {}",
+                        values.len(),
+                        degree + 1
+                    )));
+                }
+                for (acc, value) in evals.iter_mut().zip(values) {
+                    *acc += value;
+                }
             }
-            for (acc, value) in evals.iter_mut().zip(values) {
-                *acc += value;
-            }
-        }
+            evals
+        };
 
         if evals[0] + evals[1] != claim {
             return Err(WhirNativeCircuitError::ConstraintViolation(format!(
@@ -3959,29 +4102,50 @@ where
     for round in 0..num_variables {
         let suffix_vars = num_variables - round - 1;
         let suffix_count = 1usize << suffix_vars;
-        let suffix_results = (0..suffix_count)
+        #[cfg(feature = "parallel")]
+        let (evals, _) = (0..suffix_count)
             .into_par_iter()
-            .map(|suffix| {
-                let mut scratch = EF::zero_vec(degree + 1);
+            .try_fold(
+                || (EF::zero_vec(degree + 1), EF::zero_vec(degree + 1)),
+                |(mut acc, mut scratch),
+                 suffix|
+                 -> Result<(Vec<EF>, Vec<EF>), WhirNativeCircuitError> {
+                    for value in &mut scratch {
+                        *value = EF::ZERO;
+                    }
+                    suffix_evals(state, round, suffix, degree, &mut scratch)?;
+                    for (acc, &value) in acc.iter_mut().zip(&scratch) {
+                        *acc += value;
+                    }
+                    Ok((acc, scratch))
+                },
+            )
+            .try_reduce(
+                || (EF::zero_vec(degree + 1), Vec::new()),
+                |(mut left, scratch),
+                 (right, _)|
+                 -> Result<(Vec<EF>, Vec<EF>), WhirNativeCircuitError> {
+                    for (left, value) in left.iter_mut().zip(right) {
+                        *left += value;
+                    }
+                    Ok((left, scratch))
+                },
+            )?;
+        #[cfg(not(feature = "parallel"))]
+        let evals = {
+            let mut evals = EF::zero_vec(degree + 1);
+            let mut scratch = EF::zero_vec(degree + 1);
+            for suffix in 0..suffix_count {
+                for value in &mut scratch {
+                    *value = EF::ZERO;
+                }
                 suffix_evals(state, round, suffix, degree, &mut scratch)?;
-                Ok(scratch)
-            })
-            .collect::<Vec<_>>();
-        let mut evals = EF::zero_vec(degree + 1);
-
-        for values in suffix_results {
-            let values = values?;
-            if values.len() != degree + 1 {
-                return Err(WhirNativeCircuitError::ConstraintViolation(format!(
-                    "sumcheck round {round} suffix evaluator returned {} points, expected {}",
-                    values.len(),
-                    degree + 1
-                )));
+                for (acc, &value) in evals.iter_mut().zip(&scratch) {
+                    *acc += value;
+                }
             }
-            for (acc, value) in evals.iter_mut().zip(values) {
-                *acc += value;
-            }
-        }
+            evals
+        };
 
         if evals[0] + evals[1] != claim {
             return Err(WhirNativeCircuitError::ConstraintViolation(format!(
@@ -4112,21 +4276,21 @@ const ALU_READ_B_COL: usize = 6;
 const ALU_READ_C_COL: usize = 7;
 const ALU_READ_OUT_COL: usize = 8;
 const ALU_READ_ACC_COL: usize = 9;
-const P2_BB_D4_WIDTH16_D: usize = 4;
-const P2_BB_D4_WIDTH16_WIDTH: usize = 16;
-const P2_BB_D4_WIDTH16_WIDTH_EXT: usize = 4;
-const P2_BB_D4_WIDTH16_RATE_EXT: usize = 2;
-const P2_BB_D4_WIDTH16_PERM_WIDTH: usize = 298;
-const P2_BB_D4_WIDTH16_OUTPUT_OFFSET: usize = 282;
-const P2_BB_D4_WIDTH16_MMCS_INDEX_SUM_COL: usize = P2_BB_D4_WIDTH16_PERM_WIDTH + 1;
-const P2_BB_D4_WIDTH16_AIR_WIDTH: usize = P2_BB_D4_WIDTH16_PERM_WIDTH + 2;
-const P2_BB_D4_WIDTH16_SHIFTED_OFFSET: usize = P2_BB_D4_WIDTH16_AIR_WIDTH;
-const P2_BB_D4_WIDTH16_READ_OFFSET: usize = P2_BB_D4_WIDTH16_AIR_WIDTH * 2;
-const P2_BB_D4_WIDTH16_PREPROCESSED_WIDTH: usize = 24;
-const P2_BB_D4_WIDTH16_WITNESS_PORTS: usize =
-    P2_BB_D4_WIDTH16_WIDTH_EXT + P2_BB_D4_WIDTH16_RATE_EXT + 2;
-const P2_BB_D4_WIDTH16_TABLE_WIDTH: usize =
-    P2_BB_D4_WIDTH16_READ_OFFSET + P2_BB_D4_WIDTH16_WITNESS_PORTS;
+const P2_KB_D4_WIDTH16_D: usize = 4;
+const P2_KB_D4_WIDTH16_WIDTH: usize = 16;
+const P2_KB_D4_WIDTH16_WIDTH_EXT: usize = 4;
+const P2_KB_D4_WIDTH16_RATE_EXT: usize = 2;
+const P2_KB_D4_WIDTH16_PERM_WIDTH: usize = 164;
+const P2_KB_D4_WIDTH16_OUTPUT_OFFSET: usize = 148;
+const P2_KB_D4_WIDTH16_MMCS_INDEX_SUM_COL: usize = P2_KB_D4_WIDTH16_PERM_WIDTH + 1;
+const P2_KB_D4_WIDTH16_AIR_WIDTH: usize = P2_KB_D4_WIDTH16_PERM_WIDTH + 2;
+const P2_KB_D4_WIDTH16_SHIFTED_OFFSET: usize = P2_KB_D4_WIDTH16_AIR_WIDTH;
+const P2_KB_D4_WIDTH16_READ_OFFSET: usize = P2_KB_D4_WIDTH16_AIR_WIDTH * 2;
+const P2_KB_D4_WIDTH16_PREPROCESSED_WIDTH: usize = 24;
+const P2_KB_D4_WIDTH16_WITNESS_PORTS: usize =
+    P2_KB_D4_WIDTH16_WIDTH_EXT + P2_KB_D4_WIDTH16_RATE_EXT + 2;
+const P2_KB_D4_WIDTH16_TABLE_WIDTH: usize =
+    P2_KB_D4_WIDTH16_READ_OFFSET + P2_KB_D4_WIDTH16_WITNESS_PORTS;
 const P2_SHIFT_AUX_WIDTH: usize = 2;
 const P2_SHIFT_SENDER_INV_COL: usize = 0;
 const P2_SHIFT_RECEIVER_INV_COL: usize = 1;
@@ -4240,13 +4404,13 @@ where
 fn expected_poseidon2_rows_from_circuit<EF>(
     circuit: &Circuit<EF>,
     op_type: &str,
-) -> Result<Vec<Poseidon2CircuitRow<BabyBear>>, WhirNativeCircuitError>
+) -> Result<Vec<Poseidon2CircuitRow<KoalaBear>>, WhirNativeCircuitError>
 where
     EF: Field,
 {
     let config = poseidon2_config_from_op_type(op_type)
         .ok_or_else(|| WhirNativeCircuitError::UnsupportedNonPrimitiveTrace(op_type.to_string()))?;
-    if config != Poseidon2Config::BabyBearD4Width16 {
+    if config != Poseidon2Config::KoalaBearD4Width16 {
         return Err(unsupported_poseidon2_component(op_type));
     }
 
@@ -4261,7 +4425,7 @@ fn expected_poseidon2_row_from_op<EF>(
     config: Poseidon2Config,
     row_index: usize,
     op: &Op<EF>,
-) -> Result<Poseidon2CircuitRow<BabyBear>, WhirNativeCircuitError>
+) -> Result<Poseidon2CircuitRow<KoalaBear>, WhirNativeCircuitError>
 where
     EF: Field,
 {
@@ -4361,8 +4525,8 @@ where
         new_start,
         merkle_path,
         mmcs_bit: false,
-        mmcs_index_sum: BabyBear::ZERO,
-        input_values: BabyBear::zero_vec(config.width()),
+        mmcs_index_sum: KoalaBear::ZERO,
+        input_values: KoalaBear::zero_vec(config.width()),
         in_ctl,
         input_indices,
         out_ctl,
@@ -4381,7 +4545,7 @@ where
 {
     let config = poseidon2_config_from_op_type(op_type)
         .ok_or_else(|| WhirNativeCircuitError::UnsupportedNonPrimitiveTrace(op_type.to_string()))?;
-    if config != Poseidon2Config::BabyBearD4Width16 {
+    if config != Poseidon2Config::KoalaBearD4Width16 {
         return Err(unsupported_poseidon2_component(op_type));
     }
 
@@ -4511,7 +4675,7 @@ fn prove_table_local_constraints<F, EF, MT, Challenger, MakeChallenger>(
 ) -> Result<Option<WhirNativeLocalConstraintProof<EF>>, WhirNativeCircuitError>
 where
     F: Field,
-    EF: ExtensionField<F> + ExtensionField<BabyBear> + Send + Sync,
+    EF: ExtensionField<F> + ExtensionField<KoalaBear> + Send + Sync,
     MT: Mmcs<F>,
     MT::Commitment: Clone,
     Challenger: FieldChallenger<F>
@@ -4633,7 +4797,7 @@ fn verify_table_local_constraints<F, EF, MT, Challenger, MakeChallenger>(
 ) -> Result<Vec<(usize, Point<EF>, EF)>, WhirNativeCircuitError>
 where
     F: Field,
-    EF: ExtensionField<F> + ExtensionField<BabyBear> + Send + Sync,
+    EF: ExtensionField<F> + ExtensionField<KoalaBear> + Send + Sync,
     MT: Mmcs<F>,
     MT::Commitment: Clone,
     Challenger: FieldChallenger<F>
@@ -6288,13 +6452,13 @@ fn prove_poseidon2_air_constraints<F, EF, Challenger>(
     table_index: usize,
     table: &WhirNativeTableData<EF>,
     witness_table: &WhirNativeTableData<EF>,
-    expected_rows: &[Poseidon2CircuitRow<BabyBear>],
+    expected_rows: &[Poseidon2CircuitRow<KoalaBear>],
     direction_bit_witness_ids: &[u32],
     challenger: &mut Challenger,
 ) -> Result<WhirNativeLocalConstraintProof<EF>, WhirNativeCircuitError>
 where
     F: Field,
-    EF: ExtensionField<F> + ExtensionField<BabyBear> + Send + Sync,
+    EF: ExtensionField<F> + ExtensionField<KoalaBear> + Send + Sync,
     Challenger: FieldChallenger<F>
         + GrindingChallenger<Witness = F>
         + CanSampleUniformBits<F>
@@ -6308,7 +6472,7 @@ where
         table.metadata.padded_height,
     )?;
     let shifted_preprocessed =
-        cyclic_shift_row_major_values(&preprocessed, P2_BB_D4_WIDTH16_PREPROCESSED_WIDTH)?;
+        cyclic_shift_row_major_values(&preprocessed, P2_KB_D4_WIDTH16_PREPROCESSED_WIDTH)?;
     let degree = poseidon2_air_local_degree(&table.metadata, &witness_table.metadata);
     observe_local_constraint_context::<F, EF, Challenger>(
         challenger,
@@ -6414,13 +6578,13 @@ fn verify_poseidon2_air_constraints<F, EF, Challenger>(
     table_index: usize,
     metadata: &WhirNativeTableMetadata,
     witness_metadata: &WhirNativeTableMetadata,
-    expected_rows: &[Poseidon2CircuitRow<BabyBear>],
+    expected_rows: &[Poseidon2CircuitRow<KoalaBear>],
     direction_bit_witness_ids: &[u32],
     challenger: &mut Challenger,
 ) -> Result<Vec<(usize, Point<EF>, EF)>, WhirNativeCircuitError>
 where
     F: Field,
-    EF: ExtensionField<F> + ExtensionField<BabyBear> + Send + Sync,
+    EF: ExtensionField<F> + ExtensionField<KoalaBear> + Send + Sync,
     Challenger: FieldChallenger<F>
         + GrindingChallenger<Witness = F>
         + CanSampleUniformBits<F>
@@ -6501,7 +6665,7 @@ where
     let preprocessed =
         poseidon2_expected_preprocessed_values::<F, EF>(expected_rows, metadata.padded_height)?;
     let shifted_preprocessed =
-        cyclic_shift_row_major_values(&preprocessed, P2_BB_D4_WIDTH16_PREPROCESSED_WIDTH)?;
+        cyclic_shift_row_major_values(&preprocessed, P2_KB_D4_WIDTH16_PREPROCESSED_WIDTH)?;
     let prep_local = eval_poseidon2_preprocessed_row::<F, EF>(&preprocessed, &terminal_row_point)?;
     let prep_next =
         eval_poseidon2_preprocessed_row::<F, EF>(&shifted_preprocessed, &terminal_row_point)?;
@@ -6537,7 +6701,7 @@ where
 
 fn validate_poseidon2_air_metadata<F, EF>(
     metadata: &WhirNativeTableMetadata,
-    expected_rows: &[Poseidon2CircuitRow<BabyBear>],
+    expected_rows: &[Poseidon2CircuitRow<KoalaBear>],
 ) -> Result<(), WhirNativeCircuitError>
 where
     F: Field,
@@ -6549,17 +6713,17 @@ where
             metadata.kind
         )));
     }
-    if EF::DIMENSION != P2_BB_D4_WIDTH16_D {
+    if EF::DIMENSION != P2_KB_D4_WIDTH16_D {
         return Err(WhirNativeCircuitError::UnsupportedSoundComponent(format!(
-            "BabyBear D4 Width16 Poseidon2 AIR requires extension degree {}, got {}",
-            P2_BB_D4_WIDTH16_D,
+            "KoalaBear D4 Width16 Poseidon2 AIR requires extension degree {}, got {}",
+            P2_KB_D4_WIDTH16_D,
             EF::DIMENSION
         )));
     }
-    if metadata.width != P2_BB_D4_WIDTH16_TABLE_WIDTH {
+    if metadata.width != P2_KB_D4_WIDTH16_TABLE_WIDTH {
         return Err(WhirNativeCircuitError::ConstraintViolation(format!(
             "Poseidon2 AIR table width mismatch: expected {}, got {}",
-            P2_BB_D4_WIDTH16_TABLE_WIDTH, metadata.width
+            P2_KB_D4_WIDTH16_TABLE_WIDTH, metadata.width
         )));
     }
     if metadata.active_rows != expected_rows.len().max(1).next_power_of_two() {
@@ -6573,7 +6737,7 @@ where
 }
 
 fn validate_poseidon2_direction_bit_witness_ids(
-    expected_rows: &[Poseidon2CircuitRow<BabyBear>],
+    expected_rows: &[Poseidon2CircuitRow<KoalaBear>],
     direction_bit_witness_ids: &[u32],
 ) -> Result<(), WhirNativeCircuitError> {
     if direction_bit_witness_ids.len() != expected_rows.len() {
@@ -6638,31 +6802,31 @@ where
     let eq = FoldedColumn::new(
         Poly::<EF>::new_from_point(zerocheck_point.as_slice(), EF::ONE).into_evals(),
     );
-    let local_columns = (0..P2_BB_D4_WIDTH16_AIR_WIDTH)
+    let local_columns = (0..P2_KB_D4_WIDTH16_AIR_WIDTH)
         .map(|column| table_column_values(table, column).map(FoldedColumn::new))
         .collect::<Result<Vec<_>, _>>()?;
-    let shifted_columns = (0..P2_BB_D4_WIDTH16_AIR_WIDTH)
+    let shifted_columns = (0..P2_KB_D4_WIDTH16_AIR_WIDTH)
         .map(|column| {
-            table_column_values(table, P2_BB_D4_WIDTH16_SHIFTED_OFFSET + column)
+            table_column_values(table, P2_KB_D4_WIDTH16_SHIFTED_OFFSET + column)
                 .map(FoldedColumn::new)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let read_columns = (0..P2_BB_D4_WIDTH16_WITNESS_PORTS)
+    let read_columns = (0..P2_KB_D4_WIDTH16_WITNESS_PORTS)
         .map(|column| {
-            table_column_values(table, P2_BB_D4_WIDTH16_READ_OFFSET + column).map(FoldedColumn::new)
+            table_column_values(table, P2_KB_D4_WIDTH16_READ_OFFSET + column).map(FoldedColumn::new)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let preprocessed_columns = (0..P2_BB_D4_WIDTH16_PREPROCESSED_WIDTH)
+    let preprocessed_columns = (0..P2_KB_D4_WIDTH16_PREPROCESSED_WIDTH)
         .map(|column| {
-            row_major_column_values(preprocessed, P2_BB_D4_WIDTH16_PREPROCESSED_WIDTH, column)
+            row_major_column_values(preprocessed, P2_KB_D4_WIDTH16_PREPROCESSED_WIDTH, column)
                 .map(FoldedColumn::new)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let shifted_preprocessed_columns = (0..P2_BB_D4_WIDTH16_PREPROCESSED_WIDTH)
+    let shifted_preprocessed_columns = (0..P2_KB_D4_WIDTH16_PREPROCESSED_WIDTH)
         .map(|column| {
             row_major_column_values(
                 shifted_preprocessed,
-                P2_BB_D4_WIDTH16_PREPROCESSED_WIDTH,
+                P2_KB_D4_WIDTH16_PREPROCESSED_WIDTH,
                 column,
             )
             .map(FoldedColumn::new)
@@ -6682,7 +6846,7 @@ where
 
 fn poseidon2_folded_suffix_evals_into<F, EF>(
     metadata: &WhirNativeTableMetadata,
-    expected_rows: &[Poseidon2CircuitRow<BabyBear>],
+    expected_rows: &[Poseidon2CircuitRow<KoalaBear>],
     state: &Poseidon2FoldedSumcheckState<EF>,
     suffix: usize,
     degree: usize,
@@ -6691,7 +6855,7 @@ fn poseidon2_folded_suffix_evals_into<F, EF>(
 ) -> Result<(), WhirNativeCircuitError>
 where
     F: Field,
-    EF: ExtensionField<F> + ExtensionField<BabyBear> + Send + Sync,
+    EF: ExtensionField<F> + ExtensionField<KoalaBear> + Send + Sync,
 {
     if out.len() != degree + 1 {
         return Err(WhirNativeCircuitError::ConstraintViolation(format!(
@@ -6715,22 +6879,22 @@ where
         let eq = state.eq.line_value::<F>(suffix, point);
         let local_values = diagnostics.time(
             WhirNativeLocalDiagMetric::TableColumn,
-            P2_BB_D4_WIDTH16_AIR_WIDTH,
+            P2_KB_D4_WIDTH16_AIR_WIDTH,
             || folded_column_line_values::<F, EF>(&state.local_columns, suffix, point),
         );
         let shifted_values = diagnostics.time(
             WhirNativeLocalDiagMetric::TableColumn,
-            P2_BB_D4_WIDTH16_AIR_WIDTH,
+            P2_KB_D4_WIDTH16_AIR_WIDTH,
             || folded_column_line_values::<F, EF>(&state.shifted_columns, suffix, point),
         );
         let prep_local = diagnostics.time(
             WhirNativeLocalDiagMetric::StaticSelector,
-            P2_BB_D4_WIDTH16_PREPROCESSED_WIDTH,
+            P2_KB_D4_WIDTH16_PREPROCESSED_WIDTH,
             || folded_column_line_values::<F, EF>(&state.preprocessed_columns, suffix, point),
         );
         let prep_next = diagnostics.time(
             WhirNativeLocalDiagMetric::StaticSelector,
-            P2_BB_D4_WIDTH16_PREPROCESSED_WIDTH,
+            P2_KB_D4_WIDTH16_PREPROCESSED_WIDTH,
             || {
                 folded_column_line_values::<F, EF>(
                     &state.shifted_preprocessed_columns,
@@ -6741,7 +6905,7 @@ where
         );
         let read_values = diagnostics.time(
             WhirNativeLocalDiagMetric::TableColumn,
-            P2_BB_D4_WIDTH16_WITNESS_PORTS,
+            P2_KB_D4_WIDTH16_WITNESS_PORTS,
             || folded_column_line_values::<F, EF>(&state.read_columns, suffix, point),
         );
         let constraint = diagnostics.time(WhirNativeLocalDiagMetric::ConstraintBatch, 1, || {
@@ -6774,7 +6938,7 @@ fn poseidon2_air_local_degree(
 }
 
 fn poseidon2_expected_preprocessed_values<F, EF>(
-    expected_rows: &[Poseidon2CircuitRow<BabyBear>],
+    expected_rows: &[Poseidon2CircuitRow<KoalaBear>],
     padded_height: usize,
 ) -> Result<Vec<EF>, WhirNativeCircuitError>
 where
@@ -6782,18 +6946,18 @@ where
     EF: ExtensionField<F>,
 {
     let preprocessed = extract_preprocessed_from_operations::<
-        P2_BB_D4_WIDTH16_WIDTH_EXT,
-        P2_BB_D4_WIDTH16_RATE_EXT,
-        BabyBear,
-        BabyBear,
-    >(expected_rows, P2_BB_D4_WIDTH16_D as u32, P2_BB_D4_WIDTH16_D);
-    let air = BabyBearD4Width16::default_air_with_preprocessed(preprocessed, padded_height);
-    let matrix = BaseAir::<BabyBear>::preprocessed_trace(&air).ok_or_else(|| {
+        P2_KB_D4_WIDTH16_WIDTH_EXT,
+        P2_KB_D4_WIDTH16_RATE_EXT,
+        KoalaBear,
+        KoalaBear,
+    >(expected_rows, P2_KB_D4_WIDTH16_D as u32, P2_KB_D4_WIDTH16_D);
+    let air = KoalaBearD4Width16::default_air_with_preprocessed(preprocessed, padded_height);
+    let matrix = BaseAir::<KoalaBear>::preprocessed_trace(&air).ok_or_else(|| {
         WhirNativeCircuitError::ConstraintViolation(
             "Poseidon2 AIR did not produce preprocessed trace".to_string(),
         )
     })?;
-    if matrix.width != P2_BB_D4_WIDTH16_PREPROCESSED_WIDTH || matrix.height() != padded_height {
+    if matrix.width != P2_KB_D4_WIDTH16_PREPROCESSED_WIDTH || matrix.height() != padded_height {
         return Err(WhirNativeCircuitError::ConstraintViolation(
             "Poseidon2 AIR preprocessed shape mismatch".to_string(),
         ));
@@ -6801,7 +6965,7 @@ where
     Ok(matrix
         .values
         .into_iter()
-        .map(babybear_to_ef::<F, EF>)
+        .map(koalabear_to_ef::<F, EF>)
         .collect())
 }
 
@@ -6836,7 +7000,7 @@ struct WhirNativePoseidon2EvalBuilder<'a, EF> {
     is_last_row: EF,
     is_transition: EF,
     constraints: Vec<EF>,
-    _marker: PhantomData<BabyBear>,
+    _marker: PhantomData<KoalaBear>,
 }
 
 impl<'a, EF> WhirNativePoseidon2EvalBuilder<'a, EF> {
@@ -6863,9 +7027,9 @@ impl<'a, EF> WhirNativePoseidon2EvalBuilder<'a, EF> {
 
 impl<'a, EF> AirBuilder for WhirNativePoseidon2EvalBuilder<'a, EF>
 where
-    EF: ExtensionField<BabyBear> + Send + Sync,
+    EF: ExtensionField<KoalaBear> + Send + Sync,
 {
-    type F = BabyBear;
+    type F = KoalaBear;
     type Expr = EF;
     type Var = EF;
     type PreprocessedWindow = RowWindow<'a, EF>;
@@ -6900,7 +7064,7 @@ where
 
 fn eval_poseidon2_air_constraint_from_table<F, EF>(
     table: &WhirNativeTableData<EF>,
-    expected_rows: &[Poseidon2CircuitRow<BabyBear>],
+    expected_rows: &[Poseidon2CircuitRow<KoalaBear>],
     _direction_bit_witness_ids: &[u32],
     preprocessed: &[EF],
     shifted_preprocessed: &[EF],
@@ -6909,28 +7073,28 @@ fn eval_poseidon2_air_constraint_from_table<F, EF>(
 ) -> Result<EF, WhirNativeCircuitError>
 where
     F: Field,
-    EF: ExtensionField<F> + ExtensionField<BabyBear> + Send + Sync,
+    EF: ExtensionField<F> + ExtensionField<KoalaBear> + Send + Sync,
 {
-    let local_values = (0..P2_BB_D4_WIDTH16_AIR_WIDTH)
+    let local_values = (0..P2_KB_D4_WIDTH16_AIR_WIDTH)
         .map(|column| eval_table_column_at_row_point::<F, EF>(table, row_point, column))
         .collect::<Result<Vec<_>, _>>()?;
-    let shifted_values = (0..P2_BB_D4_WIDTH16_AIR_WIDTH)
+    let shifted_values = (0..P2_KB_D4_WIDTH16_AIR_WIDTH)
         .map(|column| {
             eval_table_column_at_row_point::<F, EF>(
                 table,
                 row_point,
-                P2_BB_D4_WIDTH16_SHIFTED_OFFSET + column,
+                P2_KB_D4_WIDTH16_SHIFTED_OFFSET + column,
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
     let prep_local = eval_poseidon2_preprocessed_row::<F, EF>(preprocessed, row_point)?;
     let prep_next = eval_poseidon2_preprocessed_row::<F, EF>(shifted_preprocessed, row_point)?;
-    let read_values = (0..P2_BB_D4_WIDTH16_WITNESS_PORTS)
+    let read_values = (0..P2_KB_D4_WIDTH16_WITNESS_PORTS)
         .map(|column| {
             eval_table_column_at_row_point::<F, EF>(
                 table,
                 row_point,
-                P2_BB_D4_WIDTH16_READ_OFFSET + column,
+                P2_KB_D4_WIDTH16_READ_OFFSET + column,
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -6950,7 +7114,7 @@ where
 #[allow(clippy::too_many_arguments)]
 fn eval_poseidon2_air_constraint_from_values<F, EF>(
     metadata: &WhirNativeTableMetadata,
-    expected_rows: &[Poseidon2CircuitRow<BabyBear>],
+    expected_rows: &[Poseidon2CircuitRow<KoalaBear>],
     row_point: &Point<EF>,
     local_values: &[EF],
     shifted_values: &[EF],
@@ -6961,23 +7125,23 @@ fn eval_poseidon2_air_constraint_from_values<F, EF>(
 ) -> Result<EF, WhirNativeCircuitError>
 where
     F: Field,
-    EF: ExtensionField<F> + ExtensionField<BabyBear> + Send + Sync,
+    EF: ExtensionField<F> + ExtensionField<KoalaBear> + Send + Sync,
 {
-    if local_values.len() != P2_BB_D4_WIDTH16_AIR_WIDTH
-        || shifted_values.len() != P2_BB_D4_WIDTH16_AIR_WIDTH
+    if local_values.len() != P2_KB_D4_WIDTH16_AIR_WIDTH
+        || shifted_values.len() != P2_KB_D4_WIDTH16_AIR_WIDTH
     {
         return Err(WhirNativeCircuitError::ConstraintViolation(
             "Poseidon2 AIR terminal main width mismatch".to_string(),
         ));
     }
-    if prep_local.len() != P2_BB_D4_WIDTH16_PREPROCESSED_WIDTH
-        || prep_next.len() != P2_BB_D4_WIDTH16_PREPROCESSED_WIDTH
+    if prep_local.len() != P2_KB_D4_WIDTH16_PREPROCESSED_WIDTH
+        || prep_next.len() != P2_KB_D4_WIDTH16_PREPROCESSED_WIDTH
     {
         return Err(WhirNativeCircuitError::ConstraintViolation(
             "Poseidon2 AIR terminal preprocessed width mismatch".to_string(),
         ));
     }
-    if witness_values.len() != P2_BB_D4_WIDTH16_WITNESS_PORTS {
+    if witness_values.len() != P2_KB_D4_WIDTH16_WITNESS_PORTS {
         return Err(WhirNativeCircuitError::ConstraintViolation(
             "Poseidon2 AIR terminal witness port count mismatch".to_string(),
         ));
@@ -6998,7 +7162,7 @@ where
         is_last_row,
         is_transition,
     );
-    let air = BabyBearD4Width16::default_air();
+    let air = KoalaBearD4Width16::default_air();
     Air::eval(&air, &mut builder);
     let mut constraints = builder.constraints;
     constraints.extend(poseidon2_witness_binding_constraints::<F, EF>(
@@ -7027,34 +7191,34 @@ where
     let merkle_path = prep_local[tail + 3];
     let not_merkle = EF::ONE - merkle_path;
 
-    for limb in 0..P2_BB_D4_WIDTH16_WIDTH_EXT {
+    for limb in 0..P2_KB_D4_WIDTH16_WIDTH_EXT {
         let mult = prep_local[poseidon2_prep_input_ctl_col(limb)] * not_merkle;
         let witness = witness_values[limb];
         let local_limb = extension_from_base_mle_limbs::<F, EF>(
-            &local_values[limb * P2_BB_D4_WIDTH16_D..(limb + 1) * P2_BB_D4_WIDTH16_D],
+            &local_values[limb * P2_KB_D4_WIDTH16_D..(limb + 1) * P2_KB_D4_WIDTH16_D],
         );
         constraints.push(mult * (local_limb - witness));
     }
 
-    let output_witness_offset = P2_BB_D4_WIDTH16_WIDTH_EXT;
-    for limb in 0..P2_BB_D4_WIDTH16_RATE_EXT {
+    let output_witness_offset = P2_KB_D4_WIDTH16_WIDTH_EXT;
+    for limb in 0..P2_KB_D4_WIDTH16_RATE_EXT {
         let mult = prep_local[poseidon2_prep_output_ctl_col(limb)];
         let witness = witness_values[output_witness_offset + limb];
-        let start = P2_BB_D4_WIDTH16_OUTPUT_OFFSET + limb * P2_BB_D4_WIDTH16_D;
+        let start = P2_KB_D4_WIDTH16_OUTPUT_OFFSET + limb * P2_KB_D4_WIDTH16_D;
         let local_limb = extension_from_base_mle_limbs::<F, EF>(
-            &local_values[start..start + P2_BB_D4_WIDTH16_D],
+            &local_values[start..start + P2_KB_D4_WIDTH16_D],
         );
         constraints.push(mult * (local_limb - witness));
     }
 
-    let mmcs_witness = witness_values[P2_BB_D4_WIDTH16_WIDTH_EXT + P2_BB_D4_WIDTH16_RATE_EXT];
+    let mmcs_witness = witness_values[P2_KB_D4_WIDTH16_WIDTH_EXT + P2_KB_D4_WIDTH16_RATE_EXT];
     let mmcs_mult = prep_local[tail + 1] * prep_next[tail + 2];
     constraints
-        .push(mmcs_mult * (local_values[P2_BB_D4_WIDTH16_MMCS_INDEX_SUM_COL] - mmcs_witness));
+        .push(mmcs_mult * (local_values[P2_KB_D4_WIDTH16_MMCS_INDEX_SUM_COL] - mmcs_witness));
 
     let direction_witness =
-        witness_values[P2_BB_D4_WIDTH16_WIDTH_EXT + P2_BB_D4_WIDTH16_RATE_EXT + 1];
-    constraints.push(merkle_path * (local_values[P2_BB_D4_WIDTH16_PERM_WIDTH] - direction_witness));
+        witness_values[P2_KB_D4_WIDTH16_WIDTH_EXT + P2_KB_D4_WIDTH16_RATE_EXT + 1];
+    constraints.push(merkle_path * (local_values[P2_KB_D4_WIDTH16_PERM_WIDTH] - direction_witness));
     Ok(constraints)
 }
 
@@ -7074,16 +7238,16 @@ where
 }
 
 fn poseidon2_main_columns() -> Vec<usize> {
-    (0..P2_BB_D4_WIDTH16_AIR_WIDTH).collect()
+    (0..P2_KB_D4_WIDTH16_AIR_WIDTH).collect()
 }
 
 fn poseidon2_shifted_columns() -> Vec<usize> {
-    (P2_BB_D4_WIDTH16_SHIFTED_OFFSET..P2_BB_D4_WIDTH16_SHIFTED_OFFSET + P2_BB_D4_WIDTH16_AIR_WIDTH)
+    (P2_KB_D4_WIDTH16_SHIFTED_OFFSET..P2_KB_D4_WIDTH16_SHIFTED_OFFSET + P2_KB_D4_WIDTH16_AIR_WIDTH)
         .collect()
 }
 
 fn poseidon2_read_columns() -> Vec<usize> {
-    (P2_BB_D4_WIDTH16_READ_OFFSET..P2_BB_D4_WIDTH16_READ_OFFSET + P2_BB_D4_WIDTH16_WITNESS_PORTS)
+    (P2_KB_D4_WIDTH16_READ_OFFSET..P2_KB_D4_WIDTH16_READ_OFFSET + P2_KB_D4_WIDTH16_WITNESS_PORTS)
         .collect()
 }
 
@@ -7230,7 +7394,7 @@ where
     EF: Field,
 {
     if row >= table.metadata.active_rows
-        || offset + P2_BB_D4_WIDTH16_AIR_WIDTH > table.metadata.width
+        || offset + P2_KB_D4_WIDTH16_AIR_WIDTH > table.metadata.width
     {
         return Err(WhirNativeCircuitError::ConstraintViolation(
             "Poseidon2 shift row fold out of range".to_string(),
@@ -7238,7 +7402,7 @@ where
     }
     let start = row * table.metadata.padded_width + offset;
     Ok(compressed_linear_combination(
-        &table.values[start..start + P2_BB_D4_WIDTH16_AIR_WIDTH],
+        &table.values[start..start + P2_KB_D4_WIDTH16_AIR_WIDTH],
         theta,
     ))
 }
@@ -7264,7 +7428,7 @@ where
         let next_row_id = ef_from_u64::<F, EF>(((row + 1) % active_rows) as u64);
         let main_fold = poseidon2_air_row_fold_from_table(table, row, 0, theta)?;
         let shifted_fold =
-            poseidon2_air_row_fold_from_table(table, row, P2_BB_D4_WIDTH16_SHIFTED_OFFSET, theta)?;
+            poseidon2_air_row_fold_from_table(table, row, P2_KB_D4_WIDTH16_SHIFTED_OFFSET, theta)?;
         let sender_key = row_id + beta_shift * main_fold;
         let receiver_key = next_row_id + beta_shift * shifted_fold;
         let sender_inv = (alpha_shift - sender_key).try_inverse().ok_or_else(|| {
@@ -7289,7 +7453,7 @@ fn validate_poseidon2_shift_source_metadata(
     metadata: &WhirNativeTableMetadata,
 ) -> Result<(), WhirNativeCircuitError> {
     if metadata.kind != WhirNativeTableKind::Poseidon2
-        || metadata.width != P2_BB_D4_WIDTH16_TABLE_WIDTH
+        || metadata.width != P2_KB_D4_WIDTH16_TABLE_WIDTH
         || metadata.active_rows == 0
     {
         return Err(WhirNativeCircuitError::ConstraintViolation(
@@ -7328,12 +7492,12 @@ where
         table.metadata.active_rows,
         table.metadata.padded_height,
     )?);
-    let local_columns = (0..P2_BB_D4_WIDTH16_AIR_WIDTH)
+    let local_columns = (0..P2_KB_D4_WIDTH16_AIR_WIDTH)
         .map(|column| table_column_values(table, column).map(FoldedColumn::new))
         .collect::<Result<Vec<_>, _>>()?;
-    let shifted_columns = (0..P2_BB_D4_WIDTH16_AIR_WIDTH)
+    let shifted_columns = (0..P2_KB_D4_WIDTH16_AIR_WIDTH)
         .map(|column| {
-            table_column_values(table, P2_BB_D4_WIDTH16_SHIFTED_OFFSET + column)
+            table_column_values(table, P2_KB_D4_WIDTH16_SHIFTED_OFFSET + column)
                 .map(FoldedColumn::new)
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -7460,8 +7624,8 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    if local_values.len() != P2_BB_D4_WIDTH16_AIR_WIDTH
-        || shifted_values.len() != P2_BB_D4_WIDTH16_AIR_WIDTH
+    if local_values.len() != P2_KB_D4_WIDTH16_AIR_WIDTH
+        || shifted_values.len() != P2_KB_D4_WIDTH16_AIR_WIDTH
     {
         return Err(WhirNativeCircuitError::ConstraintViolation(
             "Poseidon2 shift terminal width mismatch".to_string(),
@@ -8025,8 +8189,8 @@ where
             claims.len()
         )));
     }
-    let mut local_values = EF::zero_vec(P2_BB_D4_WIDTH16_AIR_WIDTH);
-    let mut shifted_values = EF::zero_vec(P2_BB_D4_WIDTH16_AIR_WIDTH);
+    let mut local_values = EF::zero_vec(P2_KB_D4_WIDTH16_AIR_WIDTH);
+    let mut shifted_values = EF::zero_vec(P2_KB_D4_WIDTH16_AIR_WIDTH);
     for (opening_index, (&column, claim)) in local_columns.iter().zip(claims).enumerate() {
         validate_terminal_claim(
             claim,
@@ -8054,7 +8218,7 @@ where
             opening_index,
             "Poseidon2 shift shifted",
         )?;
-        shifted_values[column - P2_BB_D4_WIDTH16_SHIFTED_OFFSET] = claim.value;
+        shifted_values[column - P2_KB_D4_WIDTH16_SHIFTED_OFFSET] = claim.value;
     }
     Ok((local_values, shifted_values, claims.to_vec()))
 }
@@ -8137,8 +8301,8 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    let mut local_values = EF::zero_vec(P2_BB_D4_WIDTH16_AIR_WIDTH);
-    let mut shifted_values = EF::zero_vec(P2_BB_D4_WIDTH16_AIR_WIDTH);
+    let mut local_values = EF::zero_vec(P2_KB_D4_WIDTH16_AIR_WIDTH);
+    let mut shifted_values = EF::zero_vec(P2_KB_D4_WIDTH16_AIR_WIDTH);
     let mut claims = Vec::with_capacity(local_columns.len() + shifted_columns.len());
 
     for (column_offset, &column) in local_columns.iter().enumerate() {
@@ -8182,7 +8346,7 @@ where
                 "Poseidon2 shifted terminal opening {opening_index} point mismatch"
             )));
         }
-        shifted_values[column - P2_BB_D4_WIDTH16_SHIFTED_OFFSET] = claim.value;
+        shifted_values[column - P2_KB_D4_WIDTH16_SHIFTED_OFFSET] = claim.value;
         claims.push((expected_point, claim.value));
     }
 
@@ -8196,15 +8360,15 @@ fn extract_terminal_poseidon2_witness_values<F, EF>(
     opening_offset: usize,
     source_padded_height: usize,
     source_row_point: &Point<EF>,
-    expected_rows: &[Poseidon2CircuitRow<BabyBear>],
+    expected_rows: &[Poseidon2CircuitRow<KoalaBear>],
     direction_bit_witness_ids: &[u32],
 ) -> Result<(Vec<EF>, Vec<(Point<EF>, EF)>), WhirNativeCircuitError>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
-    let mut values = Vec::with_capacity(P2_BB_D4_WIDTH16_WITNESS_PORTS);
-    let mut claims = Vec::with_capacity(P2_BB_D4_WIDTH16_WITNESS_PORTS);
+    let mut values = Vec::with_capacity(P2_KB_D4_WIDTH16_WITNESS_PORTS);
+    let mut claims = Vec::with_capacity(P2_KB_D4_WIDTH16_WITNESS_PORTS);
     for (port, witness_ids) in poseidon2_witness_port_ids(expected_rows, direction_bit_witness_ids)
         .into_iter()
         .enumerate()
@@ -8269,11 +8433,11 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    (0..P2_BB_D4_WIDTH16_PREPROCESSED_WIDTH)
+    (0..P2_KB_D4_WIDTH16_PREPROCESSED_WIDTH)
         .map(|column| {
             eval_row_major_column_at_row_point::<F, EF>(
                 preprocessed,
-                P2_BB_D4_WIDTH16_PREPROCESSED_WIDTH,
+                P2_KB_D4_WIDTH16_PREPROCESSED_WIDTH,
                 row_point,
                 column,
             )
@@ -8333,11 +8497,11 @@ where
 
 #[allow(dead_code)]
 fn poseidon2_witness_port_ids(
-    expected_rows: &[Poseidon2CircuitRow<BabyBear>],
+    expected_rows: &[Poseidon2CircuitRow<KoalaBear>],
     direction_bit_witness_ids: &[u32],
 ) -> Vec<Vec<u32>> {
-    let mut ports = Vec::with_capacity(P2_BB_D4_WIDTH16_WITNESS_PORTS);
-    for limb in 0..P2_BB_D4_WIDTH16_WIDTH_EXT {
+    let mut ports = Vec::with_capacity(P2_KB_D4_WIDTH16_WITNESS_PORTS);
+    for limb in 0..P2_KB_D4_WIDTH16_WIDTH_EXT {
         ports.push(
             expected_rows
                 .iter()
@@ -8345,7 +8509,7 @@ fn poseidon2_witness_port_ids(
                 .collect(),
         );
     }
-    for limb in 0..P2_BB_D4_WIDTH16_RATE_EXT {
+    for limb in 0..P2_KB_D4_WIDTH16_RATE_EXT {
         ports.push(
             expected_rows
                 .iter()
@@ -8365,7 +8529,7 @@ fn poseidon2_witness_port_ids(
 
 fn observe_expected_poseidon2_rows<F, Challenger>(
     challenger: &mut Challenger,
-    expected_rows: &[Poseidon2CircuitRow<BabyBear>],
+    expected_rows: &[Poseidon2CircuitRow<KoalaBear>],
 ) where
     F: Field,
     Challenger: CanObserve<F>,
@@ -8394,11 +8558,11 @@ const fn poseidon2_prep_input_ctl_col(limb: usize) -> usize {
 }
 
 const fn poseidon2_prep_output_ctl_col(limb: usize) -> usize {
-    P2_BB_D4_WIDTH16_WIDTH_EXT * 4 + limb * 2 + 1
+    P2_KB_D4_WIDTH16_WIDTH_EXT * 4 + limb * 2 + 1
 }
 
 const fn poseidon2_prep_tail_offset() -> usize {
-    P2_BB_D4_WIDTH16_WIDTH_EXT * 4 + P2_BB_D4_WIDTH16_RATE_EXT * 2
+    P2_KB_D4_WIDTH16_WIDTH_EXT * 4 + P2_KB_D4_WIDTH16_RATE_EXT * 2
 }
 
 fn validate_known_rows_local_inputs<EF>(
@@ -9845,7 +10009,7 @@ fn prove_read_bus<F, EF, MT, Challenger, Dft, MakePcs, MakeChallenger, const DIG
 where
     F: TwoAdicField + PrimeField64 + Ord + Send + Sync + Serialize + for<'de> Deserialize<'de>,
     EF: ExtensionField<F>
-        + ExtensionField<BabyBear>
+        + ExtensionField<KoalaBear>
         + TwoAdicField
         + Send
         + Sync
@@ -9964,7 +10128,7 @@ fn verify_read_bus_proof<
 where
     F: TwoAdicField + PrimeField64 + Ord + Send + Sync + Serialize + for<'de> Deserialize<'de>,
     EF: ExtensionField<F>
-        + ExtensionField<BabyBear>
+        + ExtensionField<KoalaBear>
         + TwoAdicField
         + Send
         + Sync
@@ -10141,7 +10305,7 @@ fn prove_read_bus_section<
 where
     F: TwoAdicField + PrimeField64 + Ord + Send + Sync + Serialize + for<'de> Deserialize<'de>,
     EF: ExtensionField<F>
-        + ExtensionField<BabyBear>
+        + ExtensionField<KoalaBear>
         + TwoAdicField
         + Send
         + Sync
@@ -10354,7 +10518,7 @@ fn verify_read_bus_section<
 where
     F: TwoAdicField + PrimeField64 + Ord + Send + Sync + Serialize + for<'de> Deserialize<'de>,
     EF: ExtensionField<F>
-        + ExtensionField<BabyBear>
+        + ExtensionField<KoalaBear>
         + TwoAdicField
         + Send
         + Sync
@@ -10717,7 +10881,7 @@ fn read_bus_section_static_data<F, EF>(
 ) -> Result<ReadBusSectionStaticData<EF>, WhirNativeCircuitError>
 where
     F: Field,
-    EF: ExtensionField<F> + ExtensionField<BabyBear>,
+    EF: ExtensionField<F> + ExtensionField<KoalaBear>,
 {
     let source_metadata = metadata.get(section.table_index).ok_or_else(|| {
         WhirNativeCircuitError::ConstraintViolation(format!(
@@ -10815,7 +10979,7 @@ fn read_bus_receiver_value_column(
             }
         }
         WhirNativeReadBusSectionKind::Poseidon2 => {
-            Ok(P2_BB_D4_WIDTH16_READ_OFFSET + section.port as usize)
+            Ok(P2_KB_D4_WIDTH16_READ_OFFSET + section.port as usize)
         }
     }
 }
@@ -10827,7 +10991,7 @@ fn read_bus_receiver_witness_ids<F, EF>(
 ) -> Result<Vec<u32>, WhirNativeCircuitError>
 where
     F: Field,
-    EF: ExtensionField<F> + ExtensionField<BabyBear>,
+    EF: ExtensionField<F> + ExtensionField<KoalaBear>,
 {
     let table_metadata = metadata.get(section.table_index).ok_or_else(|| {
         WhirNativeCircuitError::ConstraintViolation(format!(
@@ -11053,7 +11217,7 @@ where
                         circuit,
                         &table_metadata.op_type,
                     )?;
-                for port in 0..P2_BB_D4_WIDTH16_WITNESS_PORTS {
+                for port in 0..P2_KB_D4_WIDTH16_WITNESS_PORTS {
                     let mut active_reads = 0usize;
                     for (row_index, row) in rows.iter().enumerate() {
                         if let Some(wid) = poseidon2_active_read_witness_id(
@@ -11126,20 +11290,20 @@ fn alu_read_column_for_port(port: usize) -> Result<usize, WhirNativeCircuitError
 }
 
 fn poseidon2_active_read_witness_id(
-    row: &Poseidon2CircuitRow<BabyBear>,
+    row: &Poseidon2CircuitRow<KoalaBear>,
     direction_bit_witness_ids: &[u32],
     row_index: usize,
     port: usize,
 ) -> Option<u32> {
-    if port < P2_BB_D4_WIDTH16_WIDTH_EXT {
+    if port < P2_KB_D4_WIDTH16_WIDTH_EXT {
         return (row.in_ctl[port] && !row.merkle_path).then_some(row.input_indices[port]);
     }
-    let output_start = P2_BB_D4_WIDTH16_WIDTH_EXT;
-    if port < output_start + P2_BB_D4_WIDTH16_RATE_EXT {
+    let output_start = P2_KB_D4_WIDTH16_WIDTH_EXT;
+    if port < output_start + P2_KB_D4_WIDTH16_RATE_EXT {
         let limb = port - output_start;
         return row.out_ctl[limb].then_some(row.output_indices[limb]);
     }
-    let mmcs_port = P2_BB_D4_WIDTH16_WIDTH_EXT + P2_BB_D4_WIDTH16_RATE_EXT;
+    let mmcs_port = P2_KB_D4_WIDTH16_WIDTH_EXT + P2_KB_D4_WIDTH16_RATE_EXT;
     if port == mmcs_port {
         return row.mmcs_ctl_enabled.then_some(row.mmcs_index_sum_idx);
     }
@@ -11893,7 +12057,6 @@ fn poseidon2_config_from_op_type(op_type: &str) -> Option<Poseidon2Config> {
 
 #[cfg(test)]
 mod tests {
-    use p3_baby_bear::{BabyBear, Poseidon2BabyBear, default_babybear_poseidon2_16};
     use p3_challenger::{
         CanObserve, CanSample, CanSampleBits, CanSampleUniformBits, DuplexChallenger,
         FieldChallenger, GrindingChallenger, ResamplingError,
@@ -11906,8 +12069,9 @@ mod tests {
     use p3_dft::Radix2DFTSmallBatch;
     use p3_field::extension::BinomialExtensionField;
     use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
+    use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear, default_koalabear_poseidon2_16};
     use p3_merkle_tree::MerkleTreeMmcs;
-    use p3_poseidon2_circuit_air::BabyBearD4Width16;
+    use p3_poseidon2_circuit_air::KoalaBearD4Width16;
     use p3_symmetric::{MerkleCap, PaddingFreeSponge, TruncatedPermutation};
     use p3_whir::parameters::{
         FoldingFactor, ProtocolParameters, SecurityAssumption, SumcheckStrategy,
@@ -11915,9 +12079,9 @@ mod tests {
 
     use super::*;
 
-    type F = BabyBear;
+    type F = KoalaBear;
     type EF = BinomialExtensionField<F, 4>;
-    type Perm = Poseidon2BabyBear<16>;
+    type Perm = Poseidon2KoalaBear<16>;
     type MyHash = PaddingFreeSponge<Perm, 16, 8, 8>;
     type MyCompress = TruncatedPermutation<Perm, 2, 8, 16>;
     type PackedF = <F as Field>::Packing;
@@ -11934,7 +12098,7 @@ mod tests {
 
     impl TestChallenger {
         fn new() -> Self {
-            Self(MyChallenger::new(default_babybear_poseidon2_16()))
+            Self(MyChallenger::new(default_koalabear_poseidon2_16()))
         }
     }
 
@@ -11990,7 +12154,7 @@ mod tests {
     }
 
     fn make_mmcs() -> MyMmcs {
-        let perm = default_babybear_poseidon2_16();
+        let perm = default_koalabear_poseidon2_16();
         MyMmcs::new(MyHash::new(perm.clone()), MyCompress::new(perm), 0)
     }
 
@@ -12140,11 +12304,11 @@ mod tests {
 
     fn poseidon2_challenger_proof() -> (Circuit<EF>, Vec<EF>, MyMmcs, MyProof) {
         let mut builder = CircuitBuilder::<EF>::new();
-        builder.enable_poseidon2_perm::<BabyBearD4Width16, _>(
-            generate_poseidon2_trace::<EF, BabyBearD4Width16>,
-            default_babybear_poseidon2_16(),
+        builder.enable_poseidon2_perm::<KoalaBearD4Width16, _>(
+            generate_poseidon2_trace::<EF, KoalaBearD4Width16>,
+            default_koalabear_poseidon2_16(),
         );
-        let config = Poseidon2Config::BabyBearD4Width16;
+        let config = Poseidon2Config::KoalaBearD4Width16;
         let inputs = (0..config.width_ext())
             .map(|_| builder.public_input())
             .collect::<Vec<_>>();
@@ -12183,11 +12347,11 @@ mod tests {
     #[test]
     fn poseidon2_air_proves_and_detects_terminal_tamper() {
         let mut builder = CircuitBuilder::<EF>::new();
-        builder.enable_poseidon2_perm::<BabyBearD4Width16, _>(
-            generate_poseidon2_trace::<EF, BabyBearD4Width16>,
-            default_babybear_poseidon2_16(),
+        builder.enable_poseidon2_perm::<KoalaBearD4Width16, _>(
+            generate_poseidon2_trace::<EF, KoalaBearD4Width16>,
+            default_koalabear_poseidon2_16(),
         );
-        let config = Poseidon2Config::BabyBearD4Width16;
+        let config = Poseidon2Config::KoalaBearD4Width16;
         let inputs = (0..config.width_ext())
             .map(|_| builder.public_input())
             .collect::<Vec<_>>();
@@ -12227,7 +12391,7 @@ mod tests {
             poseidon2_table.metadata.kind,
             WhirNativeTableKind::Poseidon2
         );
-        assert_eq!(poseidon2_table.metadata.width, P2_BB_D4_WIDTH16_TABLE_WIDTH);
+        assert_eq!(poseidon2_table.metadata.width, P2_KB_D4_WIDTH16_TABLE_WIDTH);
         let proof = prove_poseidon2_air_constraints::<F, EF, TestChallenger>(
             poseidon2_table_index,
             poseidon2_table,
@@ -12252,9 +12416,9 @@ mod tests {
 
         for (opening_index, label) in [
             (0, "current column"),
-            (P2_BB_D4_WIDTH16_AIR_WIDTH * 2, "input witness"),
+            (P2_KB_D4_WIDTH16_AIR_WIDTH * 2, "input witness"),
             (
-                P2_BB_D4_WIDTH16_AIR_WIDTH * 2 + P2_BB_D4_WIDTH16_WIDTH_EXT,
+                P2_KB_D4_WIDTH16_AIR_WIDTH * 2 + P2_KB_D4_WIDTH16_WIDTH_EXT,
                 "output witness",
             ),
         ] {
@@ -12293,11 +12457,11 @@ mod tests {
     #[test]
     fn poseidon2_merkle_witness_bindings_detect_terminal_tamper() {
         let mut builder = CircuitBuilder::<EF>::new();
-        builder.enable_poseidon2_perm::<BabyBearD4Width16, _>(
-            generate_poseidon2_trace::<EF, BabyBearD4Width16>,
-            default_babybear_poseidon2_16(),
+        builder.enable_poseidon2_perm::<KoalaBearD4Width16, _>(
+            generate_poseidon2_trace::<EF, KoalaBearD4Width16>,
+            default_koalabear_poseidon2_16(),
         );
-        let config = Poseidon2Config::BabyBearD4Width16;
+        let config = Poseidon2Config::KoalaBearD4Width16;
         let row0_inputs = (0..config.width_ext())
             .map(|i| builder.alloc_const(EF::from(F::from_u64((i + 1) as u64)), "row0"))
             .map(Some)
@@ -12378,16 +12542,16 @@ mod tests {
 
         for (port, label) in [
             (
-                P2_BB_D4_WIDTH16_WIDTH_EXT + P2_BB_D4_WIDTH16_RATE_EXT,
+                P2_KB_D4_WIDTH16_WIDTH_EXT + P2_KB_D4_WIDTH16_RATE_EXT,
                 "MMCS index",
             ),
             (
-                P2_BB_D4_WIDTH16_WIDTH_EXT + P2_BB_D4_WIDTH16_RATE_EXT + 1,
+                P2_KB_D4_WIDTH16_WIDTH_EXT + P2_KB_D4_WIDTH16_RATE_EXT + 1,
                 "direction bit",
             ),
         ] {
             let mut tampered = proof.clone();
-            tampered.terminal_openings[P2_BB_D4_WIDTH16_AIR_WIDTH * 2 + port].value += EF::ONE;
+            tampered.terminal_openings[P2_KB_D4_WIDTH16_AIR_WIDTH * 2 + port].value += EF::ONE;
             let err = verify_poseidon2_air_constraints::<F, EF, TestChallenger>(
                 &tampered,
                 poseidon2_table_index,
@@ -12418,7 +12582,7 @@ mod tests {
 
         let mut tampered = proof.clone();
         tampered.poseidon2_shift_bus_proof.sections[0].terminal_main_openings
-            [P2_BB_D4_WIDTH16_AIR_WIDTH]
+            [P2_KB_D4_WIDTH16_AIR_WIDTH]
             .value += EF::ONE;
         verify_test_proof(&circuit, &public_inputs, &mmcs, &tampered)
             .expect_err("tampered Poseidon2 shifted opening must fail");
