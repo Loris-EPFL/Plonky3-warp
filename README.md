@@ -5,54 +5,15 @@
 
 Plonky3 is a toolkit which provides a set of primitives, such as polynomial commitment schemes, for implementing polynomial IOPs (PIOPs). It is mainly used to power STARK-based zkVMs, though in principle it may be used for PLONK-based circuits or other PIOPs.
 
-This fork adds `p3-warp`, a WARP accumulation crate integrated into the Plonky3 workspace. The `warp/` crate is intended to be used as a toolkit component: it exposes WARP accumulation over Reed-Solomon codewords, root-IOP claim collection, WHIR-backed linear-opening proofs, and finalizer backends that can be plugged into higher-level proving pipelines. The current implementation is research-oriented and benchmarked inside this repository, but its API shape follows the Plonky3 style of reusable protocol building blocks rather than a standalone application.
+This fork adds `p3-warp`, a WARP accumulation crate integrated into the Plonky3 workspace. The `warp/` crate is intended to be used as a toolkit component: it exposes WARP accumulation over Reed-Solomon codewords, root-IOP claim collection, WHIR-backed linear-opening proofs, and finalizer backends that can be plugged into higher-level proving pipelines. 
 
 For questions or discussions, please use the Telegram group, [t.me/plonky3](https://t.me/plonky3).
 
-codex resume 019e239d-ab82-78d2-bab7-8513aa56de22
-# 1. Overview
+# Overview
 
 Plonky3-warp is a Rust/no_std-oriented proof-system workspace. The security-critical code is not a web service; it is a set of libraries and benchmarks used to build and verify STARK/WHIR/WARP zero-knowledge or succinct proofs. The main asset is **soundness**: a verifier must not accept a proof for a false circuit/trace/accumulation claim. Secondary assets are binding of proofs to public inputs and circuit shape, availability of verifiers consuming untrusted proofs, and zero-knowledge/hiding when optional hiding commitments or randomized protocols are used.
 
 The highest-risk path is the WHIR-native circuit prover/verifier in `circuit-prover/src/whir_native.rs`, where circuit traces become WHIR oracle commitments, local constraints, read-bus checks, Poseidon2 shift-bus checks, and table openings. WARP composition and finalization live in `warp/src/whir_compiler/`, `warp/src/root_iop/`, `warp/src/finalize/whir/`, `warp/src/protocol/`, and `warp/src/root.rs`. Commitment security depends on `commit/src/`, `merkle-tree/src/`, `whir/src/pcs/`, `whir/src/sumcheck/`, `challenger/src/`, `field/src/`, and `matrix/src/`.
-
-# 2. Threat model, Trust boundaries and assumptions
-
-**Attacker-controlled inputs.** In real deployments a malicious prover can control serialized proof objects (`WhirNativeCircuitProof`, `WarpProof*`, `WhirProof`, Merkle opening proofs), commitments, claimed openings, proof vector lengths, field elements, and private witness values. In a prover-as-a-service setting, submitted circuits/traces may also be attacker-controlled, but normal verifier deployments should treat the circuit/verifier key and protocol parameters as fixed. Public inputs may be user-controlled but are part of the public statement and must be transcript-bound, not secret.
-
-**Operator-controlled inputs.** Protocol parameters (`security_level`, `pow_bits`, `FoldingFactor`, MMCS hash/compressor, `WhirNativeCircuitOptions`), allowed operation sets, circuit definitions, feature flags, and maximum proof sizes are operator policy. If these are accepted from a proof, soundness can collapse; they should be pinned by the verifier.
-
-**Developer-controlled inputs.** Tests, benchmark fixtures, local `warp/benches/sumcheck.rs`, and environment variables are development tooling. Bugs there are usually not exploitable unless copied into production automation.
-
-Assumptions: field arithmetic and SIMD packing are correct; Poseidon2/Blake3/Merkle/hash permutations meet their claimed collision/preimage properties; Fiat-Shamir challengers are cryptographically sound; CSPRNGs used for hiding commitments are properly seeded; and verifiers run with resource limits appropriate for untrusted serialized inputs. Side-channel resistance is not a primary property of these generic arithmetic libraries unless explicitly used in a secret-bearing prover environment.
-
-# 3. Attack surface, mitigations and attacker stories
-
-**WHIR-native circuit proof verification.** `circuit-prover/src/whir_native.rs` is the central attack surface. A malicious prover may try to swap table metadata, use stale proof layouts, omit local constraints, duplicate terminal claims, or substitute read/shift-bus rows. Important controls include recomputing public and shape digests (`compute_public_io_digest`, `compute_shape_digest`), recomputing expected table metadata (`whir_native_expected_table_metadata`), checking `opening_mode`, table counts, `TABLE_LAYOUT_VERSION`, active rows, widths, terminal opening counts, and verifying local sumchecks (`verify_sumcheck`) before WHIR opening verification. Domain-separated transcript contexts such as `observe_table_context`, `observe_circuit_constraint_context`, `observe_read_bus_challenge_context`, and Poseidon2 shift contexts bind public inputs, shape, options, commitments, metadata, and sampled challenges. A false-accept bug here is critical.
-
-**Fiat-Shamir transcript binding.** `challenger/src/`, `warp/src/transcript.rs`, `whir/src/fiat_shamir/`, and the observe functions in `whir_native.rs`/`warp/src/root.rs` decide which public data influences challenges. The attacker story is replaying a valid proof under a different circuit, commitment order, opening mode, table id, or batch layout. The code uses explicit tags/constants, length observations, metadata observations, and commitment observations. Review should confirm every sampled challenge is preceded by all data it is meant to bind, especially before batching/sumcheck reductions.
-
-**WARP root IOP and WHIR compiler boundary.** `warp/src/root_iop/` records commitments and typed claim ids; `warp/src/whir_compiler/` proves those claims with WHIR. Risks are claim reordering, dropped/duplicated claim ids, base/extension confusion, or virtual commitments not being tied to real backend commitments. Mitigations include monotone ids, `RootIopOracleField`, shape checks, `RootIopBoundCommitment::observe_into`, and verifier collection of expected claims before final proof verification. Tests in `warp/src/whir_compiler/tests.rs` cover swapped commitments and tampered virtual evaluations; similar negative tests should accompany changes.
-
-**Commitment/opening binding.** `merkle-tree/src/mmcs.rs` verifies batch size, height compatibility, index bounds, proof sibling counts, cap membership, and opening shapes. `commit/src/` defines PCS/MMCS traits; `whir/src/pcs/` layers WHIR opening proofs on top. Attacker stories include malformed Merkle paths, wrong cap heights, cross-matrix dimension confusion, and commitment substitution. Existing typed errors (`MerkleTreeError`, WHIR verifier errors) are useful, but prover-only `assert!`/`panic!` paths should not be reachable from untrusted verifier inputs.
-
-**Sumcheck and batching reductions.** `circuit-prover/src/whir_native_sumcheck.rs`, `warp/src/sumcheck.rs`, `whir/src/sumcheck/`, and `whir/src/constraints/statement/linear.rs` must validate round counts, polynomial degrees, claimed sums, arities, and final residual openings. Bugs can turn many constraints into one unchecked claim. Review challenge reuse, degree assumptions, and whether claimed terminal points/values are verifier-derived rather than prover-selected.
-
-**Serialization and resource use.** Proof structs derive `serde` across `whir_native.rs`, `warp/src/whir_compiler/types.rs`, `commit/src/mmcs.rs`, and `merkle-tree/src/merkle_tree.rs`. Deserialization alone does not validate semantic lengths. An attacker can send huge vectors or malformed shapes causing memory/CPU DoS before verification returns an error. Production callers should use bounded decoders, maximum proof size/recursion depth, and catch unwinds if exposing verification as a service. Non-canonical field encodings are mostly handled by field deserializers; Goldilocks intentionally accepts any internal `u64`, so byte-level proof canonicality should not be assumed.
-
-**Unsafe/panic surfaces.** `field/src/` and `matrix/src/` contain SIMD/transmute/unchecked-row optimizations; `merkle-tree` uses unchecked matrix rows after internal bounds checks. Memory safety bugs are less likely from proof bytes directly but would be high impact. Panics from `assert!`, `unwrap`, or unchecked dimension assumptions are availability issues unless they skip a verification check.
-
-**Out of scope / lower criticality.** There is no authentication, authorization, sessions, CSRF, XSS, SSRF, SQL injection, or multi-tenant web boundary in this repository. Benchmark/report tooling and environment-variable controls are low risk unless used in production orchestration. Diagnostic trace payloads may reveal witnesses and should remain debugging artifacts.
-
-# 4. Criticality calibration (critical, high, medium, low)
-
-**Critical.** Any bug that lets a verifier accept an invalid proof or accumulator update: missing binding of public inputs/circuit shape/options/commitments into Fiat-Shamir; accepting prover-supplied metadata or opening points instead of recomputing them; Merkle/WHIR opening verification that can be forged; read-bus, Poseidon2 shift-bus, or local constraint checks that can be reordered/dropped/duplicated; field arithmetic/challenger flaws that invalidate soundness assumptions.
-
-**High.** Verification panics or undefined behavior reachable from untrusted proof bytes in a networked verifier; stale proof-layout deserialization accepted for a different mode/version; attacker-controlled protocol parameters reducing security below policy; zero-knowledge randomness misuse in hiding commitments that reveals witness data; significant soundness loss limited to a feature/table type.
-
-**Medium.** Resource-exhaustion through oversized proofs, excessive vector lengths, or expensive malformed inputs; proof malleability/non-canonical encodings that do not enable false acceptance; verifier error paths that are inconsistent but fail closed; side-channel leakage from prover operations when witnesses are secret in a shared environment.
-
-**Low.** Developer-tool and benchmark issues, logging/diagnostic information disclosure in non-production paths, prover-only correctness bugs that merely prevent proof generation, and panics requiring operator-controlled invalid circuits or parameters.
 
 ## Status
 
