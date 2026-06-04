@@ -10,6 +10,12 @@
 //! copied generic uni-STARK recursion path. Native WHIR recursion is a separate
 //! circuit shape: it verifies `p3_whir::pcs::WhirProof` objects directly instead
 //! of adapting those proofs through the FRI-specific recursive PCS traits.
+//!
+//! Current support is intentionally narrower than native WHIR: the recursive
+//! verifier below handles one committed multilinear polynomial and single-root
+//! STIR query openings. Native WHIR's `SharedBase`, `SharedExtension`, and
+//! `Batched` opening families are rejected with `VerificationError` until a
+//! matching recursive verifier is implemented for those proof shapes.
 
 use alloc::vec::Vec;
 

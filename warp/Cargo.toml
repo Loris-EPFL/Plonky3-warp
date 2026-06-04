@@ -33,6 +33,7 @@ p3-baby-bear = { path = "../baby-bear" }
 p3-circuit.workspace = true
 p3-circuit-prover = { workspace = true, features = ["std"] }
 p3-fri.workspace = true
+p3-koala-bear.workspace = true
 p3-poseidon2-circuit-air.workspace = true
 p3-recursion.workspace = true
 p3-uni-stark.workspace = true

@@ -73,24 +73,34 @@ impl WhirEqStatementTargets {
     }
 
     /// Append one evaluated equality claim.
-    pub fn add_evaluated_constraint(&mut self, point: Vec<Target>, evaluation: Target) {
-        assert_eq!(
-            point.len(),
-            self.num_variables,
-            "WHIR eq point arity mismatch"
-        );
+    pub fn add_evaluated_constraint(
+        &mut self,
+        point: Vec<Target>,
+        evaluation: Target,
+    ) -> Result<(), VerificationError> {
+        if point.len() != self.num_variables {
+            return Err(VerificationError::InvalidProofShape(format!(
+                "WHIR eq point arity mismatch: expected {}, got {}",
+                self.num_variables,
+                point.len()
+            )));
+        }
         self.points.push(point);
         self.evaluations.push(evaluation);
+        Ok(())
     }
 
     /// Concatenate another equality statement of the same arity.
-    pub fn concatenate(&mut self, other: &Self) {
-        assert_eq!(
-            self.num_variables, other.num_variables,
-            "WHIR eq statement arity mismatch"
-        );
+    pub fn concatenate(&mut self, other: &Self) -> Result<(), VerificationError> {
+        if self.num_variables != other.num_variables {
+            return Err(VerificationError::InvalidProofShape(format!(
+                "WHIR eq statement arity mismatch: expected {}, got {}",
+                self.num_variables, other.num_variables
+            )));
+        }
         self.points.extend_from_slice(&other.points);
         self.evaluations.extend_from_slice(&other.evaluations);
+        Ok(())
     }
 
     /// Number of equality constraints.
@@ -143,17 +153,23 @@ impl WhirSelectStatementTargets {
     }
 
     /// Construct a select statement from variables and values.
-    pub fn new(num_variables: usize, vars: Vec<Target>, evaluations: Vec<Target>) -> Self {
-        assert_eq!(
-            vars.len(),
-            evaluations.len(),
-            "WHIR select statement length mismatch"
-        );
-        Self {
+    pub fn new(
+        num_variables: usize,
+        vars: Vec<Target>,
+        evaluations: Vec<Target>,
+    ) -> Result<Self, VerificationError> {
+        if vars.len() != evaluations.len() {
+            return Err(VerificationError::InvalidProofShape(format!(
+                "WHIR select statement length mismatch: {} vars, {} evaluations",
+                vars.len(),
+                evaluations.len()
+            )));
+        }
+        Ok(Self {
             num_variables,
             vars,
             evaluations,
-        }
+        })
     }
 
     /// Add `sum_j gamma^(shift+j) * s_j` to the running claimed evaluation.
@@ -198,16 +214,18 @@ impl WhirConstraintTargets {
         challenge: Target,
         eq_statement: WhirEqStatementTargets,
         sel_statement: WhirSelectStatementTargets,
-    ) -> Self {
-        assert_eq!(
-            eq_statement.num_variables, sel_statement.num_variables,
-            "WHIR constraint arity mismatch"
-        );
-        Self {
+    ) -> Result<Self, VerificationError> {
+        if eq_statement.num_variables != sel_statement.num_variables {
+            return Err(VerificationError::InvalidProofShape(format!(
+                "WHIR constraint arity mismatch: eq {}, select {}",
+                eq_statement.num_variables, sel_statement.num_variables
+            )));
+        }
+        Ok(Self {
             challenge,
             eq_statement,
             sel_statement,
-        }
+        })
     }
 
     /// Number of variables in the constraint polynomial.
@@ -350,25 +368,29 @@ pub fn eval_eq_poly_circuit<EF>(
     circuit: &mut CircuitBuilder<EF>,
     point: &[Target],
     challenge: &[Target],
-) -> Target
+) -> Result<Target, VerificationError>
 where
     EF: p3_field::Field,
 {
-    assert_eq!(point.len(), challenge.len(), "WHIR eq arity mismatch");
+    if point.len() != challenge.len() {
+        return Err(VerificationError::InvalidProofShape(format!(
+            "WHIR eq arity mismatch: point {}, challenge {}",
+            point.len(),
+            challenge.len()
+        )));
+    }
     let one = circuit.define_const(EF::ONE);
     let two = circuit.define_const(EF::TWO);
-    let factors = point
-        .iter()
-        .zip(challenge)
-        .map(|(&lhs, &rhs)| {
-            let lhs_rhs = circuit.mul(lhs, rhs);
-            let twice_lhs_rhs = circuit.mul(two, lhs_rhs);
-            let without_lhs = circuit.sub(twice_lhs_rhs, lhs);
-            let without_rhs = circuit.sub(without_lhs, rhs);
-            circuit.add(one, without_rhs)
-        })
-        .collect::<Vec<_>>();
-    circuit.mul_many(&factors)
+    let mut product = one;
+    for (&lhs, &rhs) in point.iter().zip(challenge) {
+        let lhs_rhs = circuit.mul(lhs, rhs);
+        let twice_lhs_rhs = circuit.mul(two, lhs_rhs);
+        let without_lhs = circuit.sub(twice_lhs_rhs, lhs);
+        let without_rhs = circuit.sub(without_lhs, rhs);
+        let factor = circuit.add(one, without_rhs);
+        product = circuit.mul(product, factor);
+    }
+    Ok(product)
 }
 
 /// Evaluate WHIR's select polynomial for a univariate point `var`.
@@ -385,13 +407,14 @@ where
     EF: p3_field::Field,
 {
     let one = circuit.define_const(EF::ONE);
-    let mut factors = Vec::with_capacity(local_challenge.len());
+    let mut product = one;
     for &r in local_challenge.iter().rev() {
         let var_minus_one = circuit.sub(var, one);
-        factors.push(circuit.mul_add(r, var_minus_one, one));
+        let factor = circuit.mul_add(r, var_minus_one, one);
+        product = circuit.mul(product, factor);
         var = circuit.mul(var, var);
     }
-    circuit.mul_many(&factors)
+    product
 }
 
 /// Evaluate native WHIR's prefix-order batched constraint polynomial.
@@ -403,7 +426,7 @@ pub fn eval_prefix_constraints_poly_circuit<EF>(
     circuit: &mut CircuitBuilder<EF>,
     constraints: &[WhirConstraintTargets],
     folding_randomness: &[Target],
-) -> Target
+) -> Result<Target, VerificationError>
 where
     EF: p3_field::Field,
 {
@@ -411,15 +434,18 @@ where
 
     for constraint in constraints {
         let k = constraint.num_variables();
-        assert!(
-            k <= folding_randomness.len(),
-            "WHIR folding randomness shorter than constraint arity"
-        );
+        if k > folding_randomness.len() {
+            return Err(VerificationError::InvalidProofShape(format!(
+                "WHIR folding randomness shorter than constraint arity: randomness {}, arity {}",
+                folding_randomness.len(),
+                k
+            )));
+        }
         let local_challenge = &folding_randomness[folding_randomness.len() - k..];
 
         let mut power = circuit.define_const(EF::ONE);
         for point in &constraint.eq_statement.points {
-            let eq = eval_eq_poly_circuit(circuit, point, local_challenge);
+            let eq = eval_eq_poly_circuit(circuit, point, local_challenge)?;
             total = circuit.mul_add(power, eq, total);
             power = circuit.mul(power, constraint.challenge);
         }
@@ -430,7 +456,7 @@ where
         }
     }
 
-    total
+    Ok(total)
 }
 
 /// Replay WHIR sumcheck rounds in-circuit and return their sampled challenges.
@@ -444,18 +470,20 @@ pub fn verify_whir_sumcheck_rounds_circuit<BF, EF, C>(
     sumcheck: &WhirSumcheckDataTargets<BF, EF>,
     claimed_sum: &mut Target,
     pow_bits: usize,
-) -> Result<Vec<Target>, CircuitBuilderError>
+) -> Result<Vec<Target>, VerificationError>
 where
     BF: PrimeField64,
     EF: ExtensionField<BF>,
     C: RecursiveChallenger<BF, EF>,
 {
     if pow_bits > 0 {
-        assert_eq!(
-            sumcheck.pow_witnesses.len(),
-            sumcheck.polynomial_evaluations.len(),
-            "WHIR sumcheck PoW witness count must match the number of rounds"
-        );
+        if sumcheck.pow_witnesses.len() != sumcheck.polynomial_evaluations.len() {
+            return Err(VerificationError::InvalidProofShape(format!(
+                "WHIR sumcheck PoW witness count mismatch: expected {}, got {}",
+                sumcheck.polynomial_evaluations.len(),
+                sumcheck.pow_witnesses.len()
+            )));
+        }
     }
 
     let mut randomness = Vec::with_capacity(sumcheck.polynomial_evaluations.len());
@@ -486,7 +514,7 @@ pub fn verify_whir_final_sumcheck_rounds_circuit<BF, EF, C>(
     claimed_sum: &mut Target,
     rounds: usize,
     pow_bits: usize,
-) -> Result<Vec<Target>, CircuitBuilderError>
+) -> Result<Vec<Target>, VerificationError>
 where
     BF: PrimeField64,
     EF: ExtensionField<BF>,
@@ -496,12 +524,18 @@ where
         return Ok(vec![]);
     }
 
-    let sumcheck = final_sumcheck.expect("WHIR final sumcheck is required for nonzero rounds");
-    assert_eq!(
-        sumcheck.polynomial_evaluations.len(),
-        rounds,
-        "WHIR final sumcheck round count must match verifier parameters"
-    );
+    let sumcheck = final_sumcheck.ok_or_else(|| {
+        VerificationError::InvalidProofShape(format!(
+            "WHIR final sumcheck is required for {rounds} nonzero rounds"
+        ))
+    })?;
+    if sumcheck.polynomial_evaluations.len() != rounds {
+        return Err(VerificationError::InvalidProofShape(format!(
+            "WHIR final sumcheck round count mismatch: expected {}, got {}",
+            rounds,
+            sumcheck.polynomial_evaluations.len()
+        )));
+    }
     verify_whir_sumcheck_rounds_circuit(circuit, challenger, sumcheck, claimed_sum, pow_bits)
 }
 
@@ -627,12 +661,12 @@ where
 fn ood_eq_statement_from_parsed<Comm>(
     parsed: &WhirParsedCommitmentTargets<Comm>,
     num_variables: usize,
-) -> WhirEqStatementTargets {
+) -> Result<WhirEqStatementTargets, VerificationError> {
     let mut statement = WhirEqStatementTargets::initialize(num_variables);
     for (point, &answer) in parsed.ood_points.iter().zip(&parsed.ood_answers) {
-        statement.add_evaluated_constraint(point.clone(), answer);
+        statement.add_evaluated_constraint(point.clone(), answer)?;
     }
-    statement
+    Ok(statement)
 }
 
 /// Evaluate a multilinear table at `point` using WHIR's lexicographic order.
@@ -644,26 +678,45 @@ pub fn eval_multilinear_poly_circuit<EF>(
     circuit: &mut CircuitBuilder<EF>,
     evals: &[Target],
     point: &[Target],
-) -> Target
+) -> Result<Target, VerificationError>
 where
     EF: Field,
 {
-    assert_eq!(evals.len(), 1 << point.len(), "WHIR MLE arity mismatch");
+    if evals.len() != (1 << point.len()) {
+        return Err(VerificationError::InvalidProofShape(format!(
+            "WHIR MLE arity mismatch: {} evals for {} variables",
+            evals.len(),
+            point.len()
+        )));
+    }
     if evals.len() == 1 {
-        return evals[0];
+        return Ok(evals[0]);
     }
 
-    let mut layer = evals.to_vec();
-    for &r in point.iter().rev() {
-        let mut next = Vec::with_capacity(layer.len() / 2);
+    let mut point_iter = point.iter().rev();
+    let Some(&first_r) = point_iter.next() else {
+        return Err(VerificationError::InvalidProofShape(
+            "WHIR non-constant MLE has no point coordinates".to_string(),
+        ));
+    };
+    let mut layer = Vec::with_capacity(evals.len() / 2);
+    for pair in evals.chunks_exact(2) {
+        let diff = circuit.sub(pair[1], pair[0]);
+        layer.push(circuit.mul_add(first_r, diff, pair[0]));
+    }
+
+    let mut next = Vec::new();
+    for &r in point_iter {
+        next.clear();
+        next.reserve(layer.len() / 2);
         for pair in layer.chunks_exact(2) {
             let diff = circuit.sub(pair[1], pair[0]);
             next.push(circuit.mul_add(r, diff, pair[0]));
         }
-        layer = next;
+        core::mem::swap(&mut layer, &mut next);
     }
     debug_assert_eq!(layer.len(), 1);
-    layer[0]
+    Ok(layer[0])
 }
 
 fn touch_private_targets<EF>(circuit: &mut CircuitBuilder<EF>, targets: &[Target])
@@ -675,7 +728,10 @@ where
         // constrained expression, otherwise the circuit-prover witness bus sees
         // a creator row with no matching reader. `target - target = 0` is a
         // semantic no-op but forces the lowerer to emit balanced ALU reads of
-        // the target without creating a dangling output witness.
+        // the target without creating a dangling output witness. This helper
+        // must not be treated as protocol verification: every semantically
+        // relevant proof field also has to be referenced by transcript replay,
+        // algebraic checks, or MMCS verification in the verifier below.
         let zero = circuit.sub(target, target);
         circuit.assert_zero(zero);
     }
@@ -755,33 +811,12 @@ where
     less
 }
 
-fn sort_and_reject_duplicate_index_bits<EF>(
-    circuit: &mut CircuitBuilder<EF>,
-    mut indices: Vec<Vec<Target>>,
-) -> Vec<Vec<Target>>
+fn assert_sorted_unique_index_bits<EF>(circuit: &mut CircuitBuilder<EF>, indices: &[Vec<Target>])
 where
     EF: Field,
 {
     if indices.len() <= 1 {
-        return indices;
-    }
-
-    for end in (1..indices.len()).rev() {
-        for i in 0..end {
-            let left = indices[i].clone();
-            let right = indices[i + 1].clone();
-            let left_lt_right = bitvec_less_than_circuit(circuit, &left, &right);
-            let mut min_bits = Vec::with_capacity(left.len());
-            let mut max_bits = Vec::with_capacity(left.len());
-            for (&a, &b) in left.iter().zip(&right) {
-                let a_minus_b = circuit.sub(a, b);
-                let b_minus_a = circuit.sub(b, a);
-                min_bits.push(circuit.mul_add(left_lt_right, a_minus_b, b));
-                max_bits.push(circuit.mul_add(left_lt_right, b_minus_a, a));
-            }
-            indices[i] = min_bits;
-            indices[i + 1] = max_bits;
-        }
+        return;
     }
 
     let one = circuit.define_const(EF::ONE);
@@ -790,8 +825,6 @@ where
         let not_less = circuit.sub(one, strictly_less);
         circuit.assert_zero(not_less);
     }
-
-    indices
 }
 
 fn assert_boolean_bits<EF>(circuit: &mut CircuitBuilder<EF>, bits: &[Target])
@@ -872,6 +905,14 @@ where
         )));
     }
     let bit_len = sampled_bits.first().map_or(0, Vec::len);
+    for bits in sampled_bits {
+        if bits.len() != bit_len {
+            return Err(VerificationError::InvalidProofShape(
+                "WHIR raw query sample bit length mismatch".to_string(),
+            ));
+        }
+        assert_boolean_bits(circuit, bits);
+    }
     for bits in deduped_bits {
         if bits.len() != bit_len {
             return Err(VerificationError::InvalidProofShape(
@@ -880,46 +921,52 @@ where
         }
         assert_boolean_bits(circuit, bits);
     }
-    let sorted = sort_and_reject_duplicate_index_bits(circuit, deduped_bits.to_vec());
-    for (original, sorted) in deduped_bits.iter().zip(sorted.iter()) {
-        for (&a, &b) in original.iter().zip(sorted) {
-            let diff = circuit.sub(a, b);
-            circuit.assert_zero(diff);
-        }
-    }
+    assert_sorted_unique_index_bits(circuit, deduped_bits);
 
     let one = circuit.define_const(EF::ONE);
-    for sampled in sampled_bits {
+    let zero = circuit.define_const(EF::ZERO);
+    let eq_matrix = sampled_bits
+        .iter()
+        .map(|sampled| {
+            deduped_bits
+                .iter()
+                .map(|deduped| bitvec_equal_indicator(circuit, sampled, deduped))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+
+    for row in &eq_matrix {
         let mut multiplicity = circuit.define_const(EF::ZERO);
-        for deduped in deduped_bits {
-            let eq = bitvec_equal_indicator(circuit, sampled, deduped);
+        for &eq in row {
             multiplicity = circuit.add(multiplicity, eq);
         }
         let diff = circuit.sub(multiplicity, one);
         circuit.assert_zero(diff);
     }
-    for deduped in deduped_bits {
+
+    for deduped_index in 0..deduped_bits.len() {
         let mut no_match = circuit.define_const(EF::ONE);
-        for sampled in sampled_bits {
-            let eq = bitvec_equal_indicator(circuit, sampled, deduped);
+        for row in &eq_matrix {
+            let eq = row[deduped_index];
             let miss = circuit.sub(one, eq);
             no_match = circuit.mul(no_match, miss);
         }
         circuit.assert_zero(no_match);
     }
-    for prefix_count in 0..sampled_bits.len() {
+
+    let mut seen = vec![zero; deduped_bits.len()];
+    for row in &eq_matrix {
         let mut all_seen = circuit.define_const(EF::ONE);
-        for deduped in deduped_bits {
-            let mut no_match = circuit.define_const(EF::ONE);
-            for sampled in &sampled_bits[..prefix_count] {
-                let eq = bitvec_equal_indicator(circuit, sampled, deduped);
-                let miss = circuit.sub(one, eq);
-                no_match = circuit.mul(no_match, miss);
-            }
-            let seen = circuit.sub(one, no_match);
-            all_seen = circuit.mul(all_seen, seen);
+        for &seen_deduped in &seen {
+            all_seen = circuit.mul(all_seen, seen_deduped);
         }
         circuit.assert_zero(all_seen);
+
+        for (seen_deduped, &eq) in seen.iter_mut().zip(row) {
+            let both = circuit.mul(*seen_deduped, eq);
+            let either = circuit.add(*seen_deduped, eq);
+            *seen_deduped = circuit.sub(either, both);
+        }
     }
 
     Ok(())
@@ -974,6 +1021,53 @@ where
     var
 }
 
+fn verify_single_root_query_opening_with_cap_circuit<'a, BF, EF, RecMmcs>(
+    circuit: &mut CircuitBuilder<EF>,
+    perm_config: Poseidon2Config,
+    commitment_cap: &[Vec<Target>],
+    dimensions: &[Dimensions],
+    index_bits: &[Target],
+    query: &'a WhirQueryOpeningTargets<BF, EF, RecMmcs>,
+) -> Result<(&'a [Target], Vec<NonPrimitiveOpId>), VerificationError>
+where
+    BF: TwoAdicField + PrimeField64,
+    EF: ExtensionField<BF> + BasedVectorSpace<BF>,
+    RecMmcs: RecursiveMmcs<BF, EF>,
+{
+    match query {
+        WhirQueryOpeningTargets::Base { values, .. } => {
+            touch_private_targets(circuit, values);
+            let op_ids = verify_batch_circuit::<BF, EF>(
+                circuit,
+                perm_config,
+                commitment_cap,
+                dimensions,
+                index_bits,
+                core::slice::from_ref(values),
+            )?;
+            Ok((values.as_slice(), op_ids))
+        }
+        WhirQueryOpeningTargets::Extension { values, .. } => {
+            touch_private_targets(circuit, values);
+            let op_ids = verify_batch_circuit_from_extension_opened::<BF, EF>(
+                circuit,
+                perm_config,
+                commitment_cap,
+                dimensions,
+                index_bits,
+                core::slice::from_ref(values),
+            )?;
+            Ok((values.as_slice(), op_ids))
+        }
+        WhirQueryOpeningTargets::SharedBase { .. }
+        | WhirQueryOpeningTargets::SharedExtension { .. }
+        | WhirQueryOpeningTargets::Batched { .. } => Err(VerificationError::InvalidProofShape(
+            "single-root WHIR verifier received a batched/shared query opening".to_string(),
+        )),
+    }
+}
+
+#[cfg(test)]
 fn verify_single_root_query_opening_circuit<BF, EF, RecMmcs, Comm>(
     circuit: &mut CircuitBuilder<EF>,
     perm_config: Poseidon2Config,
@@ -993,38 +1087,15 @@ where
         perm_config,
         &root.to_observation_targets(),
     );
-
-    match query {
-        WhirQueryOpeningTargets::Base { values, .. } => {
-            touch_private_targets(circuit, values);
-            let op_ids = verify_batch_circuit::<BF, EF>(
-                circuit,
-                perm_config,
-                &commitment_cap,
-                dimensions,
-                index_bits,
-                core::slice::from_ref(values),
-            )?;
-            Ok((values.clone(), op_ids))
-        }
-        WhirQueryOpeningTargets::Extension { values, .. } => {
-            touch_private_targets(circuit, values);
-            let op_ids = verify_batch_circuit_from_extension_opened::<BF, EF>(
-                circuit,
-                perm_config,
-                &commitment_cap,
-                dimensions,
-                index_bits,
-                core::slice::from_ref(values),
-            )?;
-            Ok((values.clone(), op_ids))
-        }
-        WhirQueryOpeningTargets::SharedBase { .. }
-        | WhirQueryOpeningTargets::SharedExtension { .. }
-        | WhirQueryOpeningTargets::Batched { .. } => Err(VerificationError::InvalidProofShape(
-            "single-root WHIR verifier received a batched/shared query opening".to_string(),
-        )),
-    }
+    let (values, op_ids) = verify_single_root_query_opening_with_cap_circuit::<BF, EF, RecMmcs>(
+        circuit,
+        perm_config,
+        &commitment_cap,
+        dimensions,
+        index_bits,
+        query,
+    )?;
+    Ok((values.to_vec(), op_ids))
 }
 
 fn verify_whir_stir_challenges_circuit<BF, EF, C, RecMmcs, Comm>(
@@ -1083,16 +1154,22 @@ where
     let mut vars = Vec::with_capacity(queries.len());
     let mut folds = Vec::with_capacity(queries.len());
     let mut op_ids = Vec::new();
+    let commitment_cap = commitment_cap_rows_from_lifted::<BF, EF>(
+        circuit,
+        perm_config,
+        &root.to_observation_targets(),
+    );
 
     for (bits, query) in query_index_bits.iter().zip(queries) {
-        let (answer, query_ops) = verify_single_root_query_opening_circuit::<BF, EF, RecMmcs, Comm>(
-            circuit,
-            perm_config,
-            root,
-            &dimensions,
-            bits,
-            query,
-        )?;
+        let (answer, query_ops) =
+            verify_single_root_query_opening_with_cap_circuit::<BF, EF, RecMmcs>(
+                circuit,
+                perm_config,
+                &commitment_cap,
+                &dimensions,
+                bits,
+                query,
+            )?;
         if answer.len() != (1 << params.folding_factor) {
             return Err(VerificationError::InvalidProofShape(format!(
                 "WHIR STIR row width mismatch: expected {}, got {}",
@@ -1109,12 +1186,12 @@ where
             circuit,
             &answer,
             folding_randomness,
-        ));
+        )?);
         op_ids.extend(query_ops);
     }
 
     Ok((
-        WhirSelectStatementTargets::new(params.num_variables, vars, folds),
+        WhirSelectStatementTargets::new(params.num_variables, vars, folds)?,
         op_ids,
     ))
 }
@@ -1244,18 +1321,18 @@ where
 
     let mut statement = WhirEqStatementTargets::initialize(config.num_variables);
     for claim in &targets.opening_claims[0] {
-        statement.add_evaluated_constraint(claim.point.clone(), claim.value);
+        statement.add_evaluated_constraint(claim.point.clone(), claim.value)?;
     }
     statement.concatenate(&ood_eq_statement_from_parsed(
         &parsed_initial,
         config.num_variables,
-    ));
+    )?)?;
 
     let initial_constraint = WhirConstraintTargets::new(
         challenger.sample_ext(circuit),
         statement,
         WhirSelectStatementTargets::initialize(config.num_variables),
-    );
+    )?;
     initial_constraint.combine_evals(circuit, &mut claimed_eval);
     constraints.push(initial_constraint);
 
@@ -1306,18 +1383,20 @@ where
                 &targets.round_query_sample_index_bits[round_index],
                 &targets.round_query_index_bits[round_index],
                 round.pow_witness,
-                round_folding_randomness
-                    .last()
-                    .expect("initial randomness exists"),
+                round_folding_randomness.last().ok_or_else(|| {
+                    VerificationError::InvalidProofShape(
+                        "WHIR missing folding randomness before STIR round".to_string(),
+                    )
+                })?,
                 true,
             )?;
         mmcs_op_ids.extend(stir_ops);
 
         let round_constraint = WhirConstraintTargets::new(
             challenger.sample_ext(circuit),
-            ood_eq_statement_from_parsed(&parsed_round, round_params.num_variables),
+            ood_eq_statement_from_parsed(&parsed_round, round_params.num_variables)?,
             stir_statement,
-        );
+        )?;
         round_constraint.combine_evals(circuit, &mut claimed_eval);
         constraints.push(round_constraint);
 
@@ -1341,6 +1420,12 @@ where
     challenger.observe_ext_slice(circuit, final_poly);
 
     let final_round_config = config.final_round_config();
+    if final_round_config.num_variables != config.final_sumcheck_rounds {
+        return Err(VerificationError::InvalidProofShape(format!(
+            "WHIR final-round variable count mismatch: final round {}, final sumcheck {}",
+            final_round_config.num_variables, config.final_sumcheck_rounds
+        )));
+    }
     let (final_stir_statement, final_stir_ops) =
         verify_whir_stir_challenges_circuit::<BF, EF, C, RecMmcs, RecMmcs::Commitment>(
             circuit,
@@ -1352,9 +1437,11 @@ where
             &targets.final_query_sample_index_bits,
             &targets.final_query_index_bits,
             targets.proof.final_pow_witness,
-            round_folding_randomness
-                .last()
-                .expect("folding randomness exists"),
+            round_folding_randomness.last().ok_or_else(|| {
+                VerificationError::InvalidProofShape(
+                    "WHIR missing folding randomness before final STIR round".to_string(),
+                )
+            })?,
             false,
         )?;
     mmcs_op_ids.extend(final_stir_ops);
@@ -1375,9 +1462,9 @@ where
         .flat_map(IntoIterator::into_iter)
         .collect::<Vec<_>>();
     let evaluation_of_weights =
-        eval_prefix_constraints_poly_circuit(circuit, &constraints, &full_folding_randomness);
+        eval_prefix_constraints_poly_circuit(circuit, &constraints, &full_folding_randomness)?;
     let final_value =
-        eval_multilinear_poly_circuit(circuit, final_poly, &final_sumcheck_randomness);
+        eval_multilinear_poly_circuit(circuit, final_poly, &final_sumcheck_randomness)?;
     let expected = circuit.mul(evaluation_of_weights, final_value);
     let diff = circuit.sub(claimed_eval, expected);
     circuit.assert_zero(diff);
@@ -1387,16 +1474,116 @@ where
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+    use alloc::vec::Vec;
+    use core::fmt::Debug;
+
     use p3_baby_bear::BabyBear;
     use p3_circuit::ops::Poseidon2Config;
+    use p3_commit::{BatchOpening, BatchOpeningRef, Mmcs};
     use p3_field::PrimeCharacteristicRing;
     use p3_field::extension::BinomialExtensionField;
+    use p3_matrix::Matrix;
+    use p3_whir::sumcheck::SumcheckData;
 
     use super::*;
     use crate::CircuitChallenger;
+    use crate::traits::{Recursive, RecursiveMmcs};
 
     type BF = BabyBear;
     type EF = BinomialExtensionField<BF, 4>;
+
+    #[derive(Clone)]
+    struct DummyMmcs;
+
+    impl Mmcs<BF> for DummyMmcs {
+        type ProverData<M> = Vec<M>;
+        type Commitment = ();
+        type Proof = ();
+        type Error = DummyMmcsError;
+
+        fn commit<M: Matrix<BF>>(&self, inputs: Vec<M>) -> (Self::Commitment, Self::ProverData<M>) {
+            ((), inputs)
+        }
+
+        fn open_batch<M: Matrix<BF>>(
+            &self,
+            _index: usize,
+            _prover_data: &Self::ProverData<M>,
+        ) -> BatchOpening<BF, Self> {
+            BatchOpening::new(Vec::new(), ())
+        }
+
+        fn get_matrices<'a, M: Matrix<BF>>(
+            &self,
+            prover_data: &'a Self::ProverData<M>,
+        ) -> Vec<&'a M> {
+            prover_data.iter().collect()
+        }
+
+        fn verify_batch(
+            &self,
+            _commit: &Self::Commitment,
+            _dimensions: &[Dimensions],
+            _index: usize,
+            _batch_opening: BatchOpeningRef<'_, BF, Self>,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct DummyMmcsError;
+
+    #[derive(Clone)]
+    struct DummyCommitmentTargets;
+
+    impl Recursive<EF> for DummyCommitmentTargets {
+        type Input = ();
+
+        fn new(_circuit: &mut CircuitBuilder<EF>, _input: &Self::Input) -> Self {
+            Self
+        }
+
+        fn get_values(_input: &Self::Input) -> Vec<EF> {
+            Vec::new()
+        }
+    }
+
+    #[derive(Clone)]
+    struct DummyProofTargets;
+
+    impl Recursive<EF> for DummyProofTargets {
+        type Input = ();
+
+        fn new(_circuit: &mut CircuitBuilder<EF>, _input: &Self::Input) -> Self {
+            Self
+        }
+
+        fn get_values(_input: &Self::Input) -> Vec<EF> {
+            Vec::new()
+        }
+    }
+
+    struct DummyRecMmcs;
+
+    impl RecursiveMmcs<BF, EF> for DummyRecMmcs {
+        type Input = DummyMmcs;
+        type Commitment = DummyCommitmentTargets;
+        type Proof = DummyProofTargets;
+    }
+
+    fn sumcheck_targets(
+        circuit: &mut CircuitBuilder<EF>,
+        rounds: usize,
+        pow_witnesses: usize,
+    ) -> WhirSumcheckDataTargets<BF, EF> {
+        let input = SumcheckData {
+            polynomial_evaluations: vec![[EF::ZERO, EF::ZERO]; rounds],
+            pow_witnesses: vec![BF::ZERO; pow_witnesses],
+        };
+        WhirSumcheckDataTargets::new(circuit, &input)
+    }
 
     #[test]
     fn observe_whir_commitment_rejects_wrong_ood_answer_count() {
@@ -1420,6 +1607,161 @@ mod tests {
             }
             Err(error) => panic!("unexpected verification error: {error:?}"),
             Ok(_) => panic!("wrong OOD answer count should be rejected"),
+        }
+    }
+
+    #[test]
+    fn final_sumcheck_missing_is_typed_error() {
+        let mut circuit = CircuitBuilder::<EF>::new();
+        let mut challenger = CircuitChallenger::<16, 8, Poseidon2Config>::new_babybear();
+        let mut claimed_sum = circuit.define_const(EF::ZERO);
+
+        let result = verify_whir_final_sumcheck_rounds_circuit::<BF, EF, _>(
+            &mut circuit,
+            &mut challenger,
+            None,
+            &mut claimed_sum,
+            1,
+            0,
+        );
+
+        match result {
+            Err(VerificationError::InvalidProofShape(message)) => {
+                assert!(message.contains("final sumcheck is required"));
+            }
+            Err(error) => panic!("unexpected verification error: {error:?}"),
+            Ok(_) => panic!("missing final sumcheck should be rejected"),
+        }
+    }
+
+    #[test]
+    fn final_sumcheck_round_count_mismatch_is_typed_error() {
+        let mut circuit = CircuitBuilder::<EF>::new();
+        let mut challenger = CircuitChallenger::<16, 8, Poseidon2Config>::new_babybear();
+        let mut claimed_sum = circuit.define_const(EF::ZERO);
+        let sumcheck = sumcheck_targets(&mut circuit, 0, 0);
+
+        let result = verify_whir_final_sumcheck_rounds_circuit::<BF, EF, _>(
+            &mut circuit,
+            &mut challenger,
+            Some(&sumcheck),
+            &mut claimed_sum,
+            1,
+            0,
+        );
+
+        match result {
+            Err(VerificationError::InvalidProofShape(message)) => {
+                assert!(message.contains("round count mismatch"));
+            }
+            Err(error) => panic!("unexpected verification error: {error:?}"),
+            Ok(_) => panic!("wrong final sumcheck round count should be rejected"),
+        }
+    }
+
+    #[test]
+    fn sumcheck_pow_witness_count_mismatch_is_typed_error() {
+        let mut circuit = CircuitBuilder::<EF>::new();
+        let mut challenger = CircuitChallenger::<16, 8, Poseidon2Config>::new_babybear();
+        let mut claimed_sum = circuit.define_const(EF::ZERO);
+        let sumcheck = sumcheck_targets(&mut circuit, 1, 0);
+
+        let result = verify_whir_sumcheck_rounds_circuit::<BF, EF, _>(
+            &mut circuit,
+            &mut challenger,
+            &sumcheck,
+            &mut claimed_sum,
+            1,
+        );
+
+        match result {
+            Err(VerificationError::InvalidProofShape(message)) => {
+                assert!(message.contains("PoW witness count mismatch"));
+            }
+            Err(error) => panic!("unexpected verification error: {error:?}"),
+            Ok(_) => panic!("wrong PoW witness count should be rejected"),
+        }
+    }
+
+    #[test]
+    fn mle_arity_mismatch_is_typed_error() {
+        let mut circuit = CircuitBuilder::<EF>::new();
+        let zero = circuit.define_const(EF::ZERO);
+        let result = eval_multilinear_poly_circuit(&mut circuit, &[zero, zero, zero], &[zero]);
+
+        match result {
+            Err(VerificationError::InvalidProofShape(message)) => {
+                assert!(message.contains("WHIR MLE arity mismatch"));
+            }
+            Err(error) => panic!("unexpected verification error: {error:?}"),
+            Ok(_) => panic!("wrong MLE arity should be rejected"),
+        }
+    }
+
+    #[test]
+    fn eq_arity_mismatch_is_typed_error() {
+        let mut circuit = CircuitBuilder::<EF>::new();
+        let zero = circuit.define_const(EF::ZERO);
+        let result = eval_eq_poly_circuit(&mut circuit, &[zero, zero], &[zero]);
+
+        match result {
+            Err(VerificationError::InvalidProofShape(message)) => {
+                assert!(message.contains("WHIR eq arity mismatch"));
+            }
+            Err(error) => panic!("unexpected verification error: {error:?}"),
+            Ok(_) => panic!("wrong eq arity should be rejected"),
+        }
+    }
+
+    #[test]
+    fn folding_randomness_shorter_than_constraint_is_typed_error() {
+        let mut circuit = CircuitBuilder::<EF>::new();
+        let zero = circuit.define_const(EF::ZERO);
+        let constraint = WhirConstraintTargets::new(
+            zero,
+            WhirEqStatementTargets::initialize(2),
+            WhirSelectStatementTargets::initialize(2),
+        )
+        .expect("matching arity");
+
+        let result = eval_prefix_constraints_poly_circuit(&mut circuit, &[constraint], &[zero]);
+
+        match result {
+            Err(VerificationError::InvalidProofShape(message)) => {
+                assert!(message.contains("folding randomness shorter"));
+            }
+            Err(error) => panic!("unexpected verification error: {error:?}"),
+            Ok(_) => panic!("short folding randomness should be rejected"),
+        }
+    }
+
+    #[test]
+    fn single_root_verifier_rejects_shared_query_shape() {
+        let mut circuit = CircuitBuilder::<EF>::new();
+        let zero = circuit.define_const(EF::ZERO);
+        let query = WhirQueryOpeningTargets::<BF, EF, DummyRecMmcs>::SharedBase {
+            values: vec![vec![zero]],
+            proof: DummyProofTargets,
+        };
+
+        let result = verify_single_root_query_opening_circuit::<BF, EF, DummyRecMmcs, _>(
+            &mut circuit,
+            Poseidon2Config::BabyBearD4Width16,
+            &zero,
+            &[Dimensions {
+                height: 1,
+                width: 1,
+            }],
+            &[],
+            &query,
+        );
+
+        match result {
+            Err(VerificationError::InvalidProofShape(message)) => {
+                assert!(message.contains("batched/shared query opening"));
+            }
+            Err(error) => panic!("unexpected verification error: {error:?}"),
+            Ok(_) => panic!("shared query opening should be rejected"),
         }
     }
 }

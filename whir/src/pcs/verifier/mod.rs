@@ -132,6 +132,10 @@ where
         // Verify each intermediate round.
         for round_index in 0..self.n_rounds() {
             let round_params = &self.round_parameters[round_index];
+            let round_proof = proof
+                .rounds
+                .get(round_index)
+                .ok_or(VerifierError::InvalidRoundIndex { index: round_index })?;
 
             // Parse the round commitment from the proof.
             let new_commitment = ParsedCommitment::<_, MT::Commitment>::parse_with_round(
@@ -140,7 +144,13 @@ where
                 round_params.num_variables,
                 round_params.ood_samples,
                 Some(round_index),
-            );
+            )?;
+            let folding_randomness =
+                round_folding_randomness
+                    .last()
+                    .ok_or_else(|| VerifierError::MalformedProof {
+                        details: "missing folding randomness before STIR round".to_string(),
+                    })?;
 
             // Verify STIR in-domain challenges against the previous commitment.
             let stir_statement = self.verify_stir_challenges(
@@ -148,7 +158,7 @@ where
                 challenger,
                 round_params,
                 &prev_commitment,
-                round_folding_randomness.last().unwrap(),
+                folding_randomness,
                 round_index,
             )?;
 
@@ -160,7 +170,7 @@ where
             constraint.combine_evals(&mut claimed_eval);
             constraints.push(constraint);
 
-            let folding_randomness = proof.rounds[round_index].sumcheck.verify_rounds(
+            let folding_randomness = round_proof.sumcheck.verify_rounds(
                 challenger,
                 &mut claimed_eval,
                 round_params.folding_pow_bits,
@@ -171,10 +181,20 @@ where
         }
 
         // Final round: receive the polynomial in the clear.
-        let Some(final_evaluations) = proof.final_poly.clone() else {
-            panic!("Expected final polynomial");
-        };
+        let final_evaluations =
+            proof
+                .final_poly
+                .clone()
+                .ok_or_else(|| VerifierError::MalformedProof {
+                    details: "missing final polynomial".to_string(),
+                })?;
         challenger.observe_algebra_slice(final_evaluations.as_slice());
+        let folding_randomness =
+            round_folding_randomness
+                .last()
+                .ok_or_else(|| VerifierError::MalformedProof {
+                    details: "missing folding randomness before final STIR round".to_string(),
+                })?;
 
         // Verify final STIR challenges.
         let stir_statement = self.verify_stir_challenges(
@@ -182,7 +202,7 @@ where
             challenger,
             &self.final_round_config(),
             &prev_commitment,
-            round_folding_randomness.last().unwrap(),
+            folding_randomness,
             self.n_rounds(),
         )?;
 
@@ -299,7 +319,11 @@ where
                 challenger.sample_algebra_element(),
                 self.num_variables,
             );
-            let eval = proof.initial_ood_answers[i];
+            let eval = proof.initial_ood_answers.get(i).copied().ok_or_else(|| {
+                VerifierError::MalformedProof {
+                    details: format!("missing initial OOD answer {i}"),
+                }
+            })?;
             challenger.observe_algebra_element(eval);
             initial_ood_statement.add_evaluated_constraint(point, eval);
         }
@@ -323,13 +347,23 @@ where
         let mut prev_commitment: Option<ParsedCommitment<EF, MT::Commitment>> = None;
         for round_index in 0..self.n_rounds() {
             let round_params = &self.round_parameters[round_index];
+            let round_proof = proof
+                .rounds
+                .get(round_index)
+                .ok_or(VerifierError::InvalidRoundIndex { index: round_index })?;
             let new_commitment = ParsedCommitment::<_, MT::Commitment>::parse_with_round(
                 proof,
                 challenger,
                 round_params.num_variables,
                 round_params.ood_samples,
                 Some(round_index),
-            );
+            )?;
+            let folding_randomness =
+                round_folding_randomness
+                    .last()
+                    .ok_or_else(|| VerifierError::MalformedProof {
+                        details: "missing folding randomness before batched STIR round".to_string(),
+                    })?;
 
             let stir_statement = if round_index == 0 {
                 self.verify_batched_stir_challenges(
@@ -337,16 +371,22 @@ where
                     challenger,
                     round_params,
                     initial_oracles,
-                    round_folding_randomness.last().unwrap(),
+                    folding_randomness,
                     round_index,
                 )?
             } else {
+                let prev_commitment =
+                    prev_commitment
+                        .as_ref()
+                        .ok_or_else(|| VerifierError::MalformedProof {
+                            details: "missing previous commitment for STIR round".to_string(),
+                        })?;
                 self.verify_stir_challenges(
                     proof,
                     challenger,
                     round_params,
-                    prev_commitment.as_ref().unwrap(),
-                    round_folding_randomness.last().unwrap(),
+                    prev_commitment,
+                    folding_randomness,
                     round_index,
                 )?
             };
@@ -359,7 +399,7 @@ where
             constraint.combine_evals(&mut claimed_eval);
             constraints.push(constraint);
 
-            let folding_randomness = proof.rounds[round_index].sumcheck.verify_rounds(
+            let folding_randomness = round_proof.sumcheck.verify_rounds(
                 challenger,
                 &mut claimed_eval,
                 round_params.folding_pow_bits,
@@ -368,10 +408,21 @@ where
             prev_commitment = Some(new_commitment);
         }
 
-        let Some(final_evaluations) = proof.final_poly.clone() else {
-            panic!("Expected final polynomial");
-        };
+        let final_evaluations =
+            proof
+                .final_poly
+                .clone()
+                .ok_or_else(|| VerifierError::MalformedProof {
+                    details: "missing final polynomial".to_string(),
+                })?;
         challenger.observe_algebra_slice(final_evaluations.as_slice());
+        let folding_randomness =
+            round_folding_randomness
+                .last()
+                .ok_or_else(|| VerifierError::MalformedProof {
+                    details: "missing folding randomness before final batched STIR round"
+                        .to_string(),
+                })?;
 
         let stir_statement = if self.n_rounds() == 0 {
             self.verify_batched_stir_challenges(
@@ -379,16 +430,22 @@ where
                 challenger,
                 &self.final_round_config(),
                 initial_oracles,
-                round_folding_randomness.last().unwrap(),
+                folding_randomness,
                 self.n_rounds(),
             )?
         } else {
+            let prev_commitment =
+                prev_commitment
+                    .as_ref()
+                    .ok_or_else(|| VerifierError::MalformedProof {
+                        details: "missing previous commitment for final STIR round".to_string(),
+                    })?;
             self.verify_stir_challenges(
                 proof,
                 challenger,
                 &self.final_round_config(),
-                prev_commitment.as_ref().unwrap(),
-                round_folding_randomness.last().unwrap(),
+                prev_commitment,
+                folding_randomness,
                 self.n_rounds(),
             )?
         };

@@ -48,4 +48,8 @@ pub enum VerifierError {
     /// Proof-of-work witness verification failed.
     #[error("Invalid proof-of-work witness")]
     InvalidPowWitness,
+
+    /// The proof is missing a required field or is internally inconsistent.
+    #[error("Malformed proof: {details}")]
+    MalformedProof { details: String },
 }

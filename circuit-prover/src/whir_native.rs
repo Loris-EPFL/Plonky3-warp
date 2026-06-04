@@ -7,6 +7,7 @@
 //! public circuit shape, table metadata, commitments, local sumchecks, and WHIR
 //! openings.
 
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
@@ -3433,29 +3434,25 @@ fn build_column_batch_layouts(
     metadata: &[WhirNativeTableMetadata],
     options: WhirNativeCircuitOptions,
 ) -> Vec<WhirNativeColumnBatchLayout> {
-    let mut layouts = Vec::<WhirNativeColumnBatchLayout>::new();
+    let mut layouts = BTreeMap::<usize, Vec<WhirNativeColumnRef>>::new();
     for (table_index, metadata) in metadata.iter().enumerate() {
         let num_variables =
             whir_native_table_row_variables(metadata).max(options.min_num_variables);
-        let layout_index = layouts
-            .iter()
-            .position(|layout| layout.num_variables == num_variables)
-            .unwrap_or_else(|| {
-                layouts.push(WhirNativeColumnBatchLayout {
-                    num_variables,
-                    columns: Vec::new(),
-                });
-                layouts.len() - 1
-            });
+        let columns = layouts.entry(num_variables).or_default();
         for column in 0..metadata.padded_width {
-            layouts[layout_index].columns.push(WhirNativeColumnRef {
+            columns.push(WhirNativeColumnRef {
                 table_index,
                 column,
             });
         }
     }
-    layouts.sort_by_key(|layout| layout.num_variables);
     layouts
+        .into_iter()
+        .map(|(num_variables, columns)| WhirNativeColumnBatchLayout {
+            num_variables,
+            columns,
+        })
+        .collect()
 }
 
 fn column_batch_values<F, EF>(

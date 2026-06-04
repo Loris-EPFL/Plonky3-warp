@@ -342,6 +342,46 @@ fn bound_recorder_binds_real_commitments_and_deterministic_claim_ids() {
 }
 
 #[test]
+fn bound_verifier_rejects_tampered_real_commitment_payload() {
+    let prover = RootIopBoundProver::<F, EF, ToyMmcs>::new(ToyMmcs, 2);
+    let fresh = prover
+        .commit_fresh_codeword(
+            alloc::vec![
+                F::from_u64(1),
+                F::from_u64(2),
+                F::from_u64(3),
+                F::from_u64(4)
+            ],
+            alloc::vec![F::from_u64(1)],
+        )
+        .unwrap();
+    let (values, proof) = <RootIopBoundProver<F, EF, ToyMmcs> as ExternalCodewordOpeningProver<
+        F,
+        RootIopBoundCommittedCodeword<F, ToyCommitment>,
+    >>::open(&prover, &fresh, 1)
+    .unwrap();
+
+    let verifier = RootIopBoundVerifier::<F, EF, ToyCommitment>::new(2);
+    let mut challenger = DummyChallenger;
+    <RootIopBoundVerifier<F, EF, ToyCommitment> as ExternalCodewordOpeningVerifier<
+        F,
+        DummyChallenger,
+    >>::observe_commitment(&verifier, &mut challenger, &fresh.commitment());
+    <RootIopBoundVerifier<F, EF, ToyCommitment> as ExternalCodewordOpeningVerifier<
+        F,
+        DummyChallenger,
+    >>::verify_opening(&verifier, &fresh.commitment(), 2, 1, values, &proof)
+    .unwrap();
+
+    let mut transcript = prover.transcript();
+    transcript.oracles[0].0.commitment.0.push(F::from_u64(99));
+    assert_eq!(
+        verifier.verify_against_transcript(&transcript),
+        Err(RootIopError::CommitmentMismatch(0))
+    );
+}
+
+#[test]
 fn witnessed_claim_check_rejects_tampered_value() {
     let prover = RootIopProver::<F, EF>::new(1);
     let fresh = prover
